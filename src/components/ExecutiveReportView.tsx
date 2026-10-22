@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { ExecutiveBoardComparison, UberCsvTripRecord } from '../types/mobility';
+import { ExecutiveBoardComparison } from '../types/mobility';
 import { SheetsService } from '../services/sheetsService';
-import { Copy, Check, Printer, Edit3, Save, RotateCcw, FileText, CheckCircle2 } from 'lucide-react';
+import { Printer, Edit3, Save, RotateCcw } from 'lucide-react';
 
 interface ExecutiveReportViewProps {
   dailyComparison: ExecutiveBoardComparison;
@@ -24,7 +24,6 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
     dailyComparison.taxiReferenceRate.toString()
   );
   const [isEditingRate, setIsEditingRate] = useState(false);
-  const [copiedSuccess, setCopiedSuccess] = useState(false);
 
   const formatBRL = (val: number) => {
     return val.toLocaleString('pt-BR', {
@@ -52,49 +51,6 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
     SheetsService.setTaxiReferenceRate(146.06);
     setIsEditingRate(false);
     onDataRefresh();
-  };
-
-  // Gerar texto formatado idêntico ao e-mail enviado à diretoria
-  const generateEmailText = () => {
-    const d = dailyComparison;
-    const a = accumulatedComparison;
-
-    return `RES: Acompanhamento Processo Uber - 10/2026
-
-Segue visão do dia ${selectedDate.split('-')[2]}/${selectedDate.split('-')[1]} e acumulado dos dois dias.
-
-Considerando o custo de referência de ${formatBRL(a.taxiReferenceRate)} por pedido de táxi, o mesmo volume de ${a.uber.tripCount} atendimentos acumulados nos dias ${availableDates.map(dt => dt.split('-')[2] + '/' + dt.split('-')[1]).join(' e ')} representaria um desembolso estimado de ${formatBRL(a.taxi.totalCost)}.
-
-A comparação com o custo real de ${formatBRL(a.uber.totalCost)} pela Uber demonstra uma economia estimada de ${formatBRL(a.taxi.totalCost - a.uber.totalCost)}, equivalente a uma redução de ${formatPercent(a.uber.costReductionPercent)} nos custos.
-
-${d.scopeTitle}
-Indicador\tTáxi\tUber
-Quantidade de pedidos/registros\t${d.taxi.tripCount}\t${d.uber.tripCount}
-Custo médio por pedido/registro\t${formatBRL(d.taxi.avgCostPerTrip)}\t${formatBRL(d.uber.avgCostPerTrip)}
-Custo total\t${formatBRL(d.taxi.totalCost)}\t${formatBRL(d.uber.totalCost)}
-Economia por pedido\t—\t${formatBRL(d.uber.economyPerTrip)}
-Redução de custo\t—\t${formatPercent(d.uber.costReductionPercent)}
-Custo mediano por registro\t${formatBRL(d.taxi.medianCost)}\t${formatBRL(d.uber.medianCost)}
-Total de passageiros\t${d.taxi.totalPassengers}\t${d.uber.totalPassengers}
-Custo médio por passageiro\t${formatBRL(d.taxi.avgCostPerPassenger)}\t${formatBRL(d.uber.avgCostPerPassenger)}
-
-${a.scopeTitle}
-Indicador\tTáxi\tUber
-Quantidade de pedidos/registros\t${a.taxi.tripCount}\t${a.uber.tripCount}
-Custo médio por pedido/registro\t${formatBRL(a.taxi.avgCostPerTrip)}\t${formatBRL(a.uber.avgCostPerTrip)}
-Custo total\t${formatBRL(a.taxi.totalCost)}\t${formatBRL(a.uber.totalCost)}
-Economia por pedido\t—\t${formatBRL(a.uber.economyPerTrip)}
-Redução de custo\t—\t${formatPercent(a.uber.costReductionPercent)}
-Custo mediano por registro\t${formatBRL(a.taxi.medianCost)}\t${formatBRL(a.uber.medianCost)}
-Total de passageiros\t${a.taxi.totalPassengers}\t${a.uber.totalPassengers}
-Custo médio por passageiro\t${formatBRL(a.taxi.avgCostPerPassenger)}\t${formatBRL(a.uber.avgCostPerPassenger)}`;
-  };
-
-  const handleCopyEmail = () => {
-    const text = generateEmailText();
-    navigator.clipboard.writeText(text);
-    setCopiedSuccess(true);
-    setTimeout(() => setCopiedSuccess(false), 2500);
   };
 
   const handlePrint = () => {
@@ -174,18 +130,18 @@ Custo médio por passageiro\t${formatBRL(a.taxi.avgCostPerPassenger)}\t${formatB
 
   return (
     <div className="space-y-6">
-      {/* Top Banner & Copy Action Toolbar */}
+      {/* Top Banner & Control Toolbar */}
       <div className="bg-white border border-slate-200 rounded-lg p-5">
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between pb-4 border-b border-slate-100 gap-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-4 border-b border-slate-100 gap-4">
           <div>
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-600"></span>
               <h2 className="text-base font-bold text-slate-900">
-                Relatório Executivo para a Diretoria
+                Resumo Executivo do Saving: Uber Central vs Táxi Avulso
               </h2>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Formato oficial consolidado para apresentação do saving obtido na migração do Táxi Avulso para Uber Central
+              Acompanhamento oficial de desembolso e economia gerada na migração do modelo de transporte
             </p>
           </div>
 
@@ -210,34 +166,12 @@ Custo médio por passageiro\t${formatBRL(a.taxi.avgCostPerPassenger)}\t${formatB
               </select>
             </div>
 
-            {/* Copy Button */}
-            <button
-              onClick={handleCopyEmail}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-md transition-colors ${
-                copiedSuccess
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-slate-900 hover:bg-slate-800 text-white shadow-xs'
-              }`}
-            >
-              {copiedSuccess ? (
-                <>
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Copiado com Sucesso!</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>Copiar Formato E-mail</span>
-                </>
-              )}
-            </button>
-
             <button
               onClick={handlePrint}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors"
               title="Imprimir relatório"
             >
-              <Printer className="w-3.5 h-3.5" />
+              <Printer className="w-3.5 h-3.5 text-slate-500" />
               <span>Imprimir / PDF</span>
             </button>
           </div>
@@ -246,7 +180,7 @@ Custo médio por passageiro\t${formatBRL(a.taxi.avgCostPerPassenger)}\t${formatB
         {/* Custo de Referência do Táxi Configurator */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pt-3 text-xs gap-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-slate-600 font-medium">Custo de referência por pedido de táxi:</span>
+            <span className="text-slate-600 font-medium">Custo contratual de referência por pedido de táxi:</span>
             {isEditingRate ? (
               <div className="flex items-center gap-1.5">
                 <span className="font-mono text-slate-500">R$</span>
@@ -296,36 +230,17 @@ Custo médio por passageiro\t${formatBRL(a.taxi.avgCostPerPassenger)}\t${formatB
           </div>
 
           <div className="text-slate-500 text-[11px]">
-            Base de cálculo: Valor padrão contratual de táxi avulso por atendimento
+            Base contratual: Valor fixo por pedido de atendimento avulso
           </div>
         </div>
       </div>
 
-      {/* Official Executive Text Card (Matching the Board Submission) */}
+      {/* Official Executive Narrative Card (Clean Dashboard UI) */}
       <div className="bg-white border border-slate-200 rounded-lg p-6 shadow-xs">
-        <div className="border-b border-slate-200 pb-3 mb-4 text-xs text-slate-500 space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-800">De:</span>
-            <span>Ivo Emmanuel Firmino de Lima</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-800">Assunto:</span>
-            <span className="font-semibold text-slate-900">RES: Acompanhamento Processo Uber - 10/2026</span>
-          </div>
-        </div>
-
         {/* Narrative Paragraph with Highlighted Numbers */}
         <div className="text-sm text-slate-800 leading-relaxed space-y-3 font-sans">
           <p>
-            Segue visão do dia{' '}
-            <strong>
-              {selectedDate.split('-')[2]}/{selectedDate.split('-')[1]}
-            </strong>{' '}
-            e acumulado dos dois dias.
-          </p>
-
-          <p>
-            Considerando o custo de referência de{' '}
+            Considerando o custo de referência contratual de{' '}
             <strong className="font-mono tabular-nums">
               {formatBRL(accumulatedComparison.taxiReferenceRate)}
             </strong>{' '}
@@ -345,7 +260,7 @@ Custo médio por passageiro\t${formatBRL(a.taxi.avgCostPerPassenger)}\t${formatB
           </p>
 
           <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-lg text-emerald-950 font-medium leading-relaxed">
-            A comparação com o custo real de{' '}
+            A comparação com o custo real faturado de{' '}
             <strong className="font-mono tabular-nums font-bold">
               {formatBRL(accumulatedComparison.uber.totalCost)}
             </strong>{' '}
@@ -357,11 +272,11 @@ Custo médio por passageiro\t${formatBRL(a.taxi.avgCostPerPassenger)}\t${formatB
             <mark className="bg-yellow-200 px-1.5 py-0.5 rounded font-mono tabular-nums font-bold text-slate-950">
               {formatPercent(accumulatedComparison.uber.costReductionPercent)}
             </mark>{' '}
-            nos custos.
+            nos custos operacionais.
           </div>
         </div>
 
-        {/* Two Official Tables Side by Side or Stacked */}
+        {/* Two Official Tables Side by Side */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
           {/* Table 1: Selected Day */}
           <div>

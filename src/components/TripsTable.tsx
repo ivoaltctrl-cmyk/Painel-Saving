@@ -1,26 +1,26 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { UberCsvTripRecord } from '../types/mobility';
+import { SheetsService } from '../services/sheetsService';
 import { 
   Search, 
   Download, 
   Users, 
   MapPin, 
-  Clock, 
-  Car, 
-  FileSpreadsheet,
+  Upload,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  CheckCircle2
 } from 'lucide-react';
 
 interface TripsTableProps {
   trips: UberCsvTripRecord[];
-  onOpenSyncModal: () => void;
+  onDataRefresh: () => void;
   taxiReferenceRate: number;
 }
 
 export const TripsTable: React.FC<TripsTableProps> = ({
   trips,
-  onOpenSyncModal,
+  onDataRefresh,
   taxiReferenceRate,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -28,6 +28,9 @@ export const TripsTable: React.FC<TripsTableProps> = ({
   const [selectedStops, setSelectedStops] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'date' | 'saving' | 'cost' | 'passengers'>('date');
   const [expandedTripId, setExpandedTripId] = useState<string | null>(null);
+  const [uploadNotice, setUploadNotice] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const formatBRL = (val: number) => {
     return val.toLocaleString('pt-BR', {
@@ -71,6 +74,27 @@ export const TripsTable: React.FC<TripsTableProps> = ({
   const totalFilteredTaxi = filteredTrips.length * taxiReferenceRate;
   const totalFilteredSaving = totalFilteredTaxi - totalFilteredUber;
   const totalFilteredPassengers = filteredTrips.reduce((acc, t) => acc + t.passengerCount, 0);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (content) {
+        const res = SheetsService.importFromCsvText(content);
+        if (res.success) {
+          setUploadNotice(`Planilha atualizada com sucesso! ${res.count} atendimentos processados.`);
+          onDataRefresh();
+          setTimeout(() => setUploadNotice(null), 4000);
+        } else {
+          alert(res.error || 'Erro ao processar arquivo CSV.');
+        }
+      }
+    };
+    reader.readAsText(file, 'utf-8');
+  };
 
   const handleExportCSV = () => {
     const headers = [
@@ -116,7 +140,7 @@ export const TripsTable: React.FC<TripsTableProps> = ({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `base_uber_saving_transporte_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `base_uber_central_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -124,11 +148,19 @@ export const TripsTable: React.FC<TripsTableProps> = ({
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-5">
+      {/* Upload confirmation notice */}
+      {uploadNotice && (
+        <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-md text-xs flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span className="font-medium">{uploadNotice}</span>
+        </div>
+      )}
+
       {/* Table Header */}
       <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between pb-4 border-b border-slate-100 gap-4">
         <div>
           <h2 className="text-base font-semibold text-slate-900">
-            Base de Dados de Transporte (Uber Central)
+            Base de Atendimentos — Uber Central
           </h2>
           <div className="flex items-center gap-2 text-xs text-slate-500 mt-1 flex-wrap">
             <span>{filteredTrips.length} de {trips.length} registros</span>
@@ -137,19 +169,28 @@ export const TripsTable: React.FC<TripsTableProps> = ({
             <span aria-hidden="true">·</span>
             <span>Uber: <strong className="font-mono tabular-nums text-slate-900">{formatBRL(totalFilteredUber)}</strong></span>
             <span aria-hidden="true">·</span>
-            <span>Táxi Ref: <strong className="font-mono tabular-nums text-slate-500">{formatBRL(totalFilteredTaxi)}</strong></span>
+            <span>Ref. Táxi: <strong className="font-mono tabular-nums text-slate-500">{formatBRL(totalFilteredTaxi)}</strong></span>
             <span aria-hidden="true">·</span>
             <span>Saving: <strong className="font-mono tabular-nums text-emerald-600">+{formatBRL(totalFilteredSaving)}</strong></span>
           </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          <input
+            type="file"
+            accept=".csv"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+            className="hidden"
+          />
+
           <button
-            onClick={onOpenSyncModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md transition-colors"
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-md transition-colors"
+            title="Importar arquivo CSV atualizado da planilha"
           >
-            <FileSpreadsheet className="w-3.5 h-3.5" />
-            <span>Sincronizar Sheets / CSV</span>
+            <Upload className="w-3.5 h-3.5 text-slate-600" />
+            <span>Atualizar CSV</span>
           </button>
 
           <button

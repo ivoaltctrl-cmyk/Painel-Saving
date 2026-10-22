@@ -1,29 +1,28 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Header, DashboardTab } from './components/Header';
 import { MetricCards } from './components/MetricCards';
 import { ExecutiveReportView } from './components/ExecutiveReportView';
 import { DailySavingChart } from './components/DailySavingChart';
 import { TripsTable } from './components/TripsTable';
-import { RealTimeQuoteTool } from './components/RealTimeQuoteTool';
-import { GoogleSheetsSyncModal } from './components/GoogleSheetsSyncModal';
 import { ApiIntegrationPanel } from './components/ApiIntegrationPanel';
-import { ScenarioEfficiencyMatrix } from './components/ScenarioEfficiencyMatrix';
 import { SheetsService } from './services/sheetsService';
 import { ExecutiveBoardComparison, UberCsvTripRecord, DailySavingRecord } from './types/mobility';
-import { FileSpreadsheet, ArrowRight, ShieldCheck, CheckCircle2, TrendingUp } from 'lucide-react';
+import { ArrowRight, ShieldCheck, CheckCircle2 } from 'lucide-react';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<DashboardTab>('board');
+  const [activeTab, setActiveTab] = useState<DashboardTab>('resumo');
   const [trips, setTrips] = useState<UberCsvTripRecord[]>([]);
   const [dailyComparison, setDailyComparison] = useState<ExecutiveBoardComparison | null>(null);
   const [accumulatedComparison, setAccumulatedComparison] = useState<ExecutiveBoardComparison | null>(null);
   const [dailyRecords, setDailyRecords] = useState<DailySavingRecord[]>([]);
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>('2026-10-22');
-  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState('11:38');
   const [taxiReferenceRate, setTaxiReferenceRate] = useState<number>(146.06);
+  const [globalNotice, setGlobalNotice] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const refreshData = useCallback(() => {
     const reportData = SheetsService.getBoardReports(selectedDate);
@@ -58,11 +57,34 @@ export default function App() {
         await SheetsService.loadInitialData();
       }
       refreshData();
+      setGlobalNotice('Dados recarregados com sucesso!');
+      setTimeout(() => setGlobalNotice(null), 3000);
     } finally {
       setTimeout(() => {
         setIsSyncing(false);
       }, 600);
     }
+  };
+
+  const handleGlobalFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (content) {
+        const res = SheetsService.importFromCsvText(content);
+        if (res.success) {
+          setGlobalNotice(`Planilha atualizada com sucesso! ${res.count} atendimentos processados.`);
+          refreshData();
+          setTimeout(() => setGlobalNotice(null), 4000);
+        } else {
+          alert(res.error || 'Erro ao processar arquivo CSV.');
+        }
+      }
+    };
+    reader.readAsText(file, 'utf-8');
   };
 
   if (!dailyComparison || !accumulatedComparison) {
@@ -75,11 +97,20 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 font-sans text-slate-900">
-      {/* Top Bar Navigation */}
+      {/* Hidden file input for header upload button */}
+      <input
+        type="file"
+        accept=".csv"
+        ref={fileInputRef}
+        onChange={handleGlobalFileUpload}
+        className="hidden"
+      />
+
+      {/* Top Bar Navigation (Clean, no scrollbar) */}
       <Header
         activeTab={activeTab}
         onTabChange={setActiveTab}
-        onOpenSyncModal={() => setIsSyncModalOpen(true)}
+        onUploadCsv={() => fileInputRef.current?.click()}
         onSyncApi={handleSyncClick}
         isSyncing={isSyncing}
         lastSyncTime={lastSyncTime}
@@ -87,7 +118,15 @@ export default function App() {
 
       {/* Main Viewport Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* Context Strip & Connected Sheet Indicator */}
+        {/* Global notification if active */}
+        {globalNotice && (
+          <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-md text-xs flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="font-medium">{globalNotice}</span>
+          </div>
+        )}
+
+        {/* Context Strip */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-slate-500">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-slate-800">Operação Aeroporto Guarulhos (GRU)</span>
@@ -98,15 +137,9 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => setIsSyncModalOpen(true)}
-              className="flex items-center gap-1.5 text-emerald-700 hover:text-emerald-800 font-medium"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Base Google Sheets Conectada ({trips.length} corridas)</span>
-            </button>
+            <span>Base de dados: <strong>{trips.length} atendimentos</strong></span>
             <span aria-hidden="true" className="text-slate-300">·</span>
-            <span className="font-mono tabular-nums text-[11px] text-slate-400">
+            <span className="font-mono tabular-nums text-[11px] text-slate-500">
               Ref. Táxi: R$ {taxiReferenceRate.toFixed(2)}/pedido
             </span>
           </div>
@@ -115,8 +148,8 @@ export default function App() {
         {/* Global Financial Metrics Bar */}
         <MetricCards comparison={accumulatedComparison} />
 
-        {/* Tab 1: Envio à Diretoria (Visão Oficial) */}
-        {activeTab === 'board' && (
+        {/* Tab 1: Resumo Executivo */}
+        {activeTab === 'resumo' && (
           <div className="space-y-6">
             <ExecutiveReportView
               dailyComparison={dailyComparison}
@@ -129,7 +162,7 @@ export default function App() {
               onDataRefresh={refreshData}
             />
 
-            {/* Quick Chart Strip Below the Board Tables */}
+            {/* Quick Chart Strip Below the Resumo Tables */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               <div className="lg:col-span-8">
                 <DailySavingChart dailyRecords={dailyRecords} />
@@ -138,26 +171,26 @@ export default function App() {
                 <div className="bg-white border border-slate-200 rounded-lg p-5">
                   <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                     <span className="text-xs uppercase font-bold tracking-wider text-slate-500">
-                      Resumo da Migração
+                      Resumo da Operação
                     </span>
                     <ShieldCheck className="w-4 h-4 text-emerald-600" />
                   </div>
                   <div className="space-y-2 mt-3 text-xs leading-relaxed text-slate-600">
                     <p>
-                      A transição do modelo tradicional de táxi avulso para <strong>Uber Central com múltiplas paradas</strong> permitiu transportar <strong>{accumulatedComparison.uber.totalPassengers} colaboradores</strong> com um desembolso médio de apenas <strong>R$ {accumulatedComparison.uber.avgCostPerPassenger.toFixed(2)} por passageiro</strong> (contra R$ {accumulatedComparison.taxi.avgCostPerPassenger.toFixed(2)} no táxi).
+                      A transição do táxi avulso para <strong>Uber Central com múltiplas paradas</strong> permitiu transportar <strong>{accumulatedComparison.uber.totalPassengers} colaboradores</strong> com um desembolso médio de <strong>R$ {accumulatedComparison.uber.avgCostPerPassenger.toFixed(2)} por passageiro</strong> (contra R$ {accumulatedComparison.taxi.avgCostPerPassenger.toFixed(2)} no táxi).
                     </p>
                     <div className="pt-2 font-bold text-slate-900 flex justify-between border-t border-slate-100">
-                      <span>Economia Total Acumulada:</span>
+                      <span>Economia Acumulada:</span>
                       <span className="text-emerald-600 font-mono tabular-nums font-extrabold text-sm">
                         +R$ {(accumulatedComparison.taxi.totalCost - accumulatedComparison.uber.totalCost).toFixed(2)}
                       </span>
                     </div>
                   </div>
                   <button
-                    onClick={() => setActiveTab('trips')}
+                    onClick={() => setActiveTab('corridas')}
                     className="mt-4 w-full py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-md flex items-center justify-center gap-1.5 transition-colors"
                   >
-                    <span>Ver as {trips.length} Corridas Detalhadas</span>
+                    <span>Ver as {trips.length} Corridas na Base</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -166,96 +199,25 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 2: Evolução do Saving & Gráficos */}
-        {activeTab === 'overview' && (
+        {/* Tab 2: Evolução Diária */}
+        {activeTab === 'evolucao' && (
           <div className="space-y-6">
             <DailySavingChart dailyRecords={dailyRecords} />
-            <ScenarioEfficiencyMatrix />
           </div>
         )}
 
-        {/* Tab 3: Base de Corridas Uber Central */}
-        {activeTab === 'trips' && (
+        {/* Tab 3: Base de Corridas */}
+        {activeTab === 'corridas' && (
           <div className="space-y-6">
             <TripsTable
               trips={trips}
-              onOpenSyncModal={() => setIsSyncModalOpen(true)}
+              onDataRefresh={refreshData}
               taxiReferenceRate={taxiReferenceRate}
             />
           </div>
         )}
 
-        {/* Tab 4: Cotação em Tempo Real */}
-        {activeTab === 'quote' && (
-          <div className="space-y-6">
-            <RealTimeQuoteTool onTripLogged={refreshData} />
-          </div>
-        )}
-
-        {/* Tab 5: Conexão Google Sheets */}
-        {activeTab === 'sheets' && (
-          <div className="space-y-6">
-            <div className="bg-white border border-slate-200 rounded-lg p-6">
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-                <div>
-                  <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                    <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
-                    Integração com Google Sheets (Base Oficial)
-                  </h2>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Conexão aberta com a planilha Google Sheets para atualização contínua e avaliação de colunas
-                  </p>
-                </div>
-                <button
-                  onClick={() => setIsSyncModalOpen(true)}
-                  className="px-3.5 py-1.5 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-md transition-colors"
-                >
-                  Abrir Conector
-                </button>
-              </div>
-
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
-                  <span className="text-slate-500 block mb-1">Status da Conexão</span>
-                  <div className="flex items-center gap-1.5 font-bold text-emerald-700">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span>Conectado e Sincronizado</span>
-                  </div>
-                  <span className="text-[11px] text-slate-400 mt-1 block">
-                    56 atendimentos carregados em memória
-                  </span>
-                </div>
-
-                <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
-                  <span className="text-slate-500 block mb-1">Custo de Referência Táxi</span>
-                  <div className="text-base font-bold font-mono tabular-nums text-slate-900">
-                    R$ {taxiReferenceRate.toFixed(2)}
-                  </div>
-                  <span className="text-[11px] text-slate-400 mt-1 block">
-                    Valor contratual por atendimento avulso
-                  </span>
-                </div>
-
-                <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
-                  <span className="text-slate-500 block mb-1">Colaboradores Transportados</span>
-                  <div className="text-base font-bold font-mono tabular-nums text-slate-900">
-                    {accumulatedComparison.uber.totalPassengers} passageiros
-                  </div>
-                  <span className="text-[11px] text-slate-400 mt-1 block">
-                    Calculados via paradas múltiplas da base
-                  </span>
-                </div>
-              </div>
-            </div>
-            <TripsTable
-              trips={trips}
-              onOpenSyncModal={() => setIsSyncModalOpen(true)}
-              taxiReferenceRate={taxiReferenceRate}
-            />
-          </div>
-        )}
-
-        {/* Tab 6: API REST */}
+        {/* Tab 4: API REST */}
         {activeTab === 'api' && (
           <div className="space-y-6">
             <ApiIntegrationPanel />
@@ -272,17 +234,10 @@ export default function App() {
             <span>Processo Uber Central vs Táxi Avulso — Acompanhamento Financeiro</span>
           </div>
           <div>
-            <span>Referência: R$ 146,06 por pedido de táxi · Economia de 61,5%</span>
+            <span>Referência: R$ {taxiReferenceRate.toFixed(2)} por pedido de táxi · Economia de {accumulatedComparison.uber.costReductionPercent.toFixed(1)}%</span>
           </div>
         </div>
       </footer>
-
-      {/* Google Sheets Sync Modal */}
-      <GoogleSheetsSyncModal
-        isOpen={isSyncModalOpen}
-        onClose={() => setIsSyncModalOpen(false)}
-        onSyncCompleted={refreshData}
-      />
     </div>
   );
 }
