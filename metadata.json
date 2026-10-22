@@ -1,0 +1,6 @@
+{
+  "name": "Painel de Saving Diário: Uber vs Táxi",
+  "description": "Painel executivo de inteligência financeira e acompanhamento em tempo real do saving diário de mobilidade corporativa (Uber vs Táxi), comparativos mensais, cotações ao vivo e otimização de gastos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

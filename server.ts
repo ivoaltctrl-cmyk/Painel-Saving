@@ -1,0 +1,196 @@
+import express from 'express';
+import { createServer as createViteServer } from 'vite';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// In-memory store for server-side API integration
+let tripsData = [
+  {
+    id: 'TRIP-API-101',
+    date: '2026-10-22',
+    time: '08:45',
+    origin: 'Av. Paulista, 1100 - Bela Vista',
+    destination: 'Av. Brig. Faria Lima, 3477 - Itaim Bibi',
+    distanceKm: 7.8,
+    durationMin: 32,
+    passengerName: 'Camila Guimarães',
+    department: 'Vendas & Novos Negócios',
+    reason: 'Reunião com Cliente',
+    chosenModal: 'taxi',
+    chosenCategory: 'Táxi Convencional',
+    actualCost: 38.50,
+    alternativeCost: 59.20,
+    saving: 20.70,
+    savingPercentage: 34.97,
+    surgeMultiplier: 1.7,
+    weatherCondition: 'Chuva Moderada',
+    trafficCondition: 'Intenso',
+    optimalChoice: true,
+  },
+  {
+    id: 'TRIP-API-102',
+    date: '2026-10-22',
+    time: '09:15',
+    origin: 'Rua Bela Cintra, 890 - Consolação',
+    destination: 'Aeroporto de Congonhas (CGH)',
+    distanceKm: 10.4,
+    durationMin: 28,
+    passengerName: 'Rodrigo Silveira',
+    department: 'Executivo & Diretoria',
+    reason: 'Translado Aeroporto',
+    chosenModal: 'uber',
+    chosenCategory: 'Uber Comfort',
+    actualCost: 46.80,
+    alternativeCost: 61.00,
+    saving: 14.20,
+    savingPercentage: 23.28,
+    surgeMultiplier: 1.1,
+    weatherCondition: 'Nublado',
+    trafficCondition: 'Moderado',
+    optimalChoice: true,
+  }
+];
+
+async function startServer() {
+  const app = express();
+  const PORT = 3000;
+
+  app.use(express.json());
+
+  // GET /api/mobility/health
+  app.get('/api/mobility/health', (_req, res) => {
+    res.json({
+      status: 'operational',
+      service: 'Mobility Saving Intelligence Engine',
+      version: '1.4.0',
+      connectedProviders: ['Uber for Business / Central', 'Google Sheets Integration', 'Cooperativas de Táxi GRU'],
+      timestamp: new Date().toISOString()
+    });
+  });
+
+  // POST /api/mobility/sheets-sync - Proxy para download direto do CSV do Google Sheets
+  app.post('/api/mobility/sheets-sync', async (req, res) => {
+    const { url } = req.body;
+    if (!url) {
+      return res.status(400).json({ error: 'URL do Google Sheets é obrigatória' });
+    }
+
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        return res.status(response.status).json({ error: `Erro HTTP ${response.status} ao acessar a planilha` });
+      }
+
+      const csv = await response.text();
+      res.json({ success: true, csv });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Falha na conexão com Google Sheets' });
+    }
+  });
+
+  // GET /api/mobility/trips - Lista todas as corridas
+  app.get('/api/mobility/trips', (_req, res) => {
+    res.json({
+      count: tripsData.length,
+      trips: tripsData
+    });
+  });
+
+  // POST /api/mobility/trips - Ingestão de corrida via Webhook
+  app.post('/api/mobility/trips', (req, res) => {
+    const newTrip = req.body;
+    if (!newTrip.origin || !newTrip.destination || !newTrip.actualCost) {
+      return res.status(400).json({ error: 'Campos obrigatórios: origin, destination, actualCost' });
+    }
+
+    const tripRecord = {
+      id: `TRIP-API-${Date.now()}`,
+      date: newTrip.date || new Date().toISOString().split('T')[0],
+      time: newTrip.time || '12:00',
+      origin: newTrip.origin,
+      destination: newTrip.destination,
+      distanceKm: Number(newTrip.distanceKm) || 8.0,
+      durationMin: Number(newTrip.durationMin) || 25,
+      passengerName: newTrip.passengerName || 'Colaborador Corporativo',
+      department: newTrip.department || 'Operações',
+      reason: newTrip.reason || 'Deslocamento a Serviço',
+      chosenModal: newTrip.chosenModal || 'uber',
+      chosenCategory: newTrip.chosenCategory || 'UberX',
+      actualCost: Number(newTrip.actualCost),
+      alternativeCost: Number(newTrip.alternativeCost || (newTrip.actualCost * 1.3)),
+      saving: Number((newTrip.alternativeCost || (newTrip.actualCost * 1.3)) - newTrip.actualCost),
+      savingPercentage: 23.0,
+      surgeMultiplier: Number(newTrip.surgeMultiplier || 1.0),
+      weatherCondition: newTrip.weatherCondition || 'Ensolarado',
+      trafficCondition: newTrip.trafficCondition || 'Moderado',
+      optimalChoice: true,
+    };
+
+    tripsData.unshift(tripRecord);
+    res.status(201).json({ success: true, trip: tripRecord });
+  });
+
+  // POST /api/mobility/quote - Cotação em tempo real de trajeto
+  app.post('/api/mobility/quote', (req, res) => {
+    const { distanceKm = 8, durationMin = 25, surgeMultiplier = 1.0, isRaining = false, taxiDiscountPercent = 20, taxiFlag = 1 } = req.body;
+
+    const baseUberCost = 5.50 + (distanceKm * 2.45) + (durationMin * 0.38);
+    const effectiveSurge = Math.max(surgeMultiplier, isRaining && surgeMultiplier === 1.0 ? 1.45 : surgeMultiplier);
+    const uberX = Math.round(Math.max(10.50, baseUberCost * effectiveSurge) * 100) / 100;
+    const uberComfort = Math.round((uberX * 1.25) * 100) / 100;
+    const uberBlack = Math.round((uberX * 1.65) * 100) / 100;
+
+    const taxiFlagCost = 6.20;
+    const taxiRatePerKm = taxiFlag === 1 ? 4.35 : 5.65;
+    const slowMinutes = durationMin > (distanceKm * 2.2) ? durationMin - (distanceKm * 2.2) : 0;
+    const taxiWaitCost = slowMinutes * 0.70;
+    const grossTaxi = taxiFlagCost + (distanceKm * taxiRatePerKm) + taxiWaitCost;
+    const discountMultiplier = Math.max(0, 1 - (taxiDiscountPercent / 100));
+    const taxiStandard = Math.round(Math.max(12.00, grossTaxi * discountMultiplier) * 100) / 100;
+    const taxiSpecial = Math.round((taxiStandard * 1.35) * 100) / 100;
+
+    const bestModal = taxiStandard < uberX ? 'taxi' : 'uber';
+    const bestPrice = bestModal === 'taxi' ? taxiStandard : uberX;
+    const alternativePrice = bestModal === 'taxi' ? uberX : taxiStandard;
+    const immediateSaving = Math.round((alternativePrice - bestPrice) * 100) / 100;
+
+    res.json({
+      bestModal,
+      bestPrice,
+      alternativePrice,
+      immediateSaving,
+      uber: { x: uberX, comfort: uberComfort, black: uberBlack },
+      taxi: { standard: taxiStandard, special: taxiSpecial },
+      surgeMultiplier: effectiveSurge,
+      timestamp: new Date().toISOString()
+    });
+  });
+
+  // Em modo de desenvolvimento, monta o middleware do Vite
+  if (process.env.NODE_ENV === 'production') {
+    app.use(express.static(path.resolve(__dirname, 'dist')));
+    app.get('*', (_req, res) => {
+      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+    });
+  } else {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[Mobility API Server] Rodando em http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer();
