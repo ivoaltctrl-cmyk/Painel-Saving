@@ -40,6 +40,10 @@ export const TripsTable: React.FC<TripsTableProps> = ({
     });
   };
 
+  const formatPercent = (val: number) => {
+    return `${val.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+  };
+
   const dates = useMemo(() => {
     const set = new Set<string>();
     trips.forEach(t => {
@@ -342,7 +346,14 @@ export const TripsTable: React.FC<TripsTableProps> = ({
 
                       {/* Uber Value */}
                       <td className="py-3 px-3 text-right font-mono tabular-nums font-bold text-slate-900 whitespace-nowrap">
-                        {formatBRL(trip.valueBrl)}
+                        <div className="flex items-center justify-end gap-1.5">
+                          {trip.isOutlier && (
+                            <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1 rounded" title="Viagem atípica (acima de Média + 2σ)">
+                              Outlier
+                            </span>
+                          )}
+                          <span>{formatBRL(trip.valueBrl)}</span>
+                        </div>
                       </td>
 
                       {/* Taxi Reference */}
@@ -356,7 +367,7 @@ export const TripsTable: React.FC<TripsTableProps> = ({
                           +{formatBRL(trip.saving)}
                         </div>
                         <div className="text-[11px] font-mono tabular-nums text-emerald-700">
-                          {trip.savingPercent.toFixed(1)}% redução
+                          {formatPercent(trip.savingPercent)} redução
                         </div>
                       </td>
 

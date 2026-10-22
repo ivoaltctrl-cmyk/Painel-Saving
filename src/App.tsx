@@ -5,33 +5,82 @@ import { ExecutiveReportView } from './components/ExecutiveReportView';
 import { DailySavingChart } from './components/DailySavingChart';
 import { TripsTable } from './components/TripsTable';
 import { ApiIntegrationPanel } from './components/ApiIntegrationPanel';
+import { TariffManagementModal } from './components/TariffManagementModal';
 import { SheetsService } from './services/sheetsService';
-import { ExecutiveBoardComparison, UberCsvTripRecord, DailySavingRecord } from './types/mobility';
+import { 
+  ExecutiveBoardComparison, 
+  UberCsvTripRecord, 
+  DailySavingRecord, 
+  PeriodFilter,
+  TaxiScenario,
+  SavingTargetConfig,
+  BreakdownSlice
+} from './types/mobility';
 import { ArrowRight, ShieldCheck, CheckCircle2 } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('resumo');
   const [trips, setTrips] = useState<UberCsvTripRecord[]>([]);
+  const [periodTrips, setPeriodTrips] = useState<UberCsvTripRecord[]>([]);
   const [dailyComparison, setDailyComparison] = useState<ExecutiveBoardComparison | null>(null);
   const [accumulatedComparison, setAccumulatedComparison] = useState<ExecutiveBoardComparison | null>(null);
   const [dailyRecords, setDailyRecords] = useState<DailySavingRecord[]>([]);
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>('2026-10-22');
   const [isSyncing, setIsSyncing] = useState(false);
-  const [lastSyncTime, setLastSyncTime] = useState('11:38');
+  const [lastSyncTime, setLastSyncTime] = useState('22/10/2026 às 11:38');
   const [taxiReferenceRate, setTaxiReferenceRate] = useState<number>(146.06);
+  const [activeScenario, setActiveScenario] = useState<TaxiScenario>(1.0);
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('all');
+  const [periodFilterLabel, setPeriodFilterLabel] = useState<string>('Todo o Período');
+  const [outliersData, setOutliersData] = useState<{
+    top5Expensive: UberCsvTripRecord[];
+    outliers: UberCsvTripRecord[];
+    meanCost: number;
+    threshold: number;
+  }>({ top5Expensive: [], outliers: [], meanCost: 0, threshold: 0 });
+  const [breakdowns, setBreakdowns] = useState<{
+    byShift: BreakdownSlice[];
+    byDistrict: BreakdownSlice[];
+    byCostCenter: BreakdownSlice[];
+  }>({ byShift: [], byDistrict: [], byCostCenter: [] });
+  const [targetConfig, setTargetConfig] = useState<SavingTargetConfig>({
+    targetType: 'value',
+    targetValue: 6000,
+    month: '2026-10',
+  });
+  const [isTariffModalOpen, setIsTariffModalOpen] = useState(false);
   const [globalNotice, setGlobalNotice] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const formatBRL = (val: number) => {
+    return val.toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+      minimumFractionDigits: 2,
+    });
+  };
+
+  const formatPercent = (val: number) => {
+    return `${val.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+  };
+
   const refreshData = useCallback(() => {
     const reportData = SheetsService.getBoardReports(selectedDate);
     setTrips(reportData.allTrips);
+    setPeriodTrips(reportData.periodTrips);
     setDailyComparison(reportData.dailyComparison);
     setAccumulatedComparison(reportData.accumulatedComparison);
     setDailyRecords(reportData.dailyRecords);
     setAvailableDates(reportData.availableDates);
-    setTaxiReferenceRate(SheetsService.getTaxiReferenceRate());
+    setTaxiReferenceRate(reportData.nominalRate);
+    setActiveScenario(reportData.activeScenario);
+    setPeriodFilter(SheetsService.getPeriodFilter());
+    setPeriodFilterLabel(reportData.periodFilterLabel);
+    setOutliersData(reportData.outliersData);
+    setBreakdowns(reportData.breakdowns);
+    setTargetConfig(reportData.targetConfig);
 
     const cfg = SheetsService.getConfig();
     setLastSyncTime(cfg.lastSyncedAt);
@@ -46,6 +95,11 @@ export default function App() {
     init();
   }, [refreshData]);
 
+  const handlePeriodFilterChange = (filter: PeriodFilter, customRange?: { start: string; end: string }) => {
+    SheetsService.setPeriodFilter(filter, customRange);
+    refreshData();
+  };
+
   // Handle manual sync button click in header
   const handleSyncClick = async () => {
     setIsSyncing(true);
@@ -57,8 +111,8 @@ export default function App() {
         await SheetsService.loadInitialData();
       }
       refreshData();
-      setGlobalNotice('Dados recarregados com sucesso!');
-      setTimeout(() => setGlobalNotice(null), 3000);
+      setGlobalNotice('Dados recarregados e reprocessados com sucesso!');
+      setTimeout(() => setGlobalNotice(null), 3500);
     } finally {
       setTimeout(() => {
         setIsSyncing(false);
@@ -95,6 +149,8 @@ export default function App() {
     );
   }
 
+  const effectiveTaxiRate = taxiReferenceRate * activeScenario;
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 font-sans text-slate-900">
       {/* Hidden file input for header upload button */}
@@ -106,7 +162,7 @@ export default function App() {
         className="hidden"
       />
 
-      {/* Top Bar Navigation (Clean, no scrollbar) */}
+      {/* Top Bar Navigation (Clean, no horizontal scrollbars) */}
       <Header
         activeTab={activeTab}
         onTabChange={setActiveTab}
@@ -126,7 +182,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Context Strip */}
+        {/* Context Strip with Brazilian Formatting */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-slate-500">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-slate-800">Operação Aeroporto Guarulhos (GRU)</span>
@@ -136,16 +192,16 @@ export default function App() {
             <span className="text-slate-900 font-medium">Uber Central vs Táxi Avulso</span>
           </div>
 
-          <div className="flex items-center gap-3">
-            <span>Base de dados: <strong>{trips.length} atendimentos</strong></span>
+          <div className="flex items-center gap-3 flex-wrap">
+            <span>Base total: <strong>{trips.length} atendimentos</strong></span>
             <span aria-hidden="true" className="text-slate-300">·</span>
-            <span className="font-mono tabular-nums text-[11px] text-slate-500">
-              Ref. Táxi: R$ {taxiReferenceRate.toFixed(2)}/pedido
+            <span className="font-mono tabular-nums text-[11px] text-slate-600">
+              Ref. Táxi: {formatBRL(effectiveTaxiRate)}/pedido ({Math.round(activeScenario * 100)}% do contrato)
             </span>
           </div>
         </div>
 
-        {/* Global Financial Metrics Bar */}
+        {/* Global Financial Metrics Cards */}
         <MetricCards comparison={accumulatedComparison} />
 
         {/* Tab 1: Resumo Executivo */}
@@ -156,19 +212,25 @@ export default function App() {
               accumulatedComparison={accumulatedComparison}
               availableDates={availableDates}
               selectedDate={selectedDate}
-              onSelectDate={(date) => {
-                setSelectedDate(date);
-              }}
+              onSelectDate={(date) => setSelectedDate(date)}
               onDataRefresh={refreshData}
+              onOpenTariffModal={() => setIsTariffModalOpen(true)}
+              lastSyncTime={lastSyncTime}
+              periodFilter={periodFilter}
+              onPeriodFilterChange={handlePeriodFilterChange}
+              periodFilterLabel={periodFilterLabel}
+              outliersData={outliersData}
+              breakdowns={breakdowns}
+              targetConfig={targetConfig}
             />
 
             {/* Quick Chart Strip Below the Resumo Tables */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               <div className="lg:col-span-8">
-                <DailySavingChart dailyRecords={dailyRecords} />
+                <DailySavingChart dailyRecords={dailyRecords} allTrips={periodTrips} />
               </div>
               <div className="lg:col-span-4 space-y-4">
-                <div className="bg-white border border-slate-200 rounded-lg p-5">
+                <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-xs">
                   <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                     <span className="text-xs uppercase font-bold tracking-wider text-slate-500">
                       Resumo da Operação
@@ -177,12 +239,12 @@ export default function App() {
                   </div>
                   <div className="space-y-2 mt-3 text-xs leading-relaxed text-slate-600">
                     <p>
-                      A transição do táxi avulso para <strong>Uber Central com múltiplas paradas</strong> permitiu transportar <strong>{accumulatedComparison.uber.totalPassengers} colaboradores</strong> com um desembolso médio de <strong>R$ {accumulatedComparison.uber.avgCostPerPassenger.toFixed(2)} por passageiro</strong> (contra R$ {accumulatedComparison.taxi.avgCostPerPassenger.toFixed(2)} no táxi).
+                      A transição do táxi avulso para <strong>Uber Central com múltiplas paradas</strong> permitiu transportar <strong>{accumulatedComparison.uber.totalPassengers} colaboradores</strong> com um desembolso médio de <strong>{formatBRL(accumulatedComparison.uber.avgCostPerPassenger)} por passageiro</strong> (contra {formatBRL(accumulatedComparison.taxi.avgCostPerPassenger)} no táxi).
                     </p>
                     <div className="pt-2 font-bold text-slate-900 flex justify-between border-t border-slate-100">
                       <span>Economia Acumulada:</span>
                       <span className="text-emerald-600 font-mono tabular-nums font-extrabold text-sm">
-                        +R$ {(accumulatedComparison.taxi.totalCost - accumulatedComparison.uber.totalCost).toFixed(2)}
+                        +{formatBRL(accumulatedComparison.taxi.totalCost - accumulatedComparison.uber.totalCost)}
                       </span>
                     </div>
                   </div>
@@ -202,7 +264,7 @@ export default function App() {
         {/* Tab 2: Evolução Diária */}
         {activeTab === 'evolucao' && (
           <div className="space-y-6">
-            <DailySavingChart dailyRecords={dailyRecords} />
+            <DailySavingChart dailyRecords={dailyRecords} allTrips={periodTrips} />
           </div>
         )}
 
@@ -212,7 +274,7 @@ export default function App() {
             <TripsTable
               trips={trips}
               onDataRefresh={refreshData}
-              taxiReferenceRate={taxiReferenceRate}
+              taxiReferenceRate={effectiveTaxiRate}
             />
           </div>
         )}
@@ -225,7 +287,14 @@ export default function App() {
         )}
       </main>
 
-      {/* Footer */}
+      {/* Modal de Gestão de Tarifas e Vigências com Auditoria */}
+      <TariffManagementModal
+        isOpen={isTariffModalOpen}
+        onClose={() => setIsTariffModalOpen(false)}
+        onTariffUpdated={refreshData}
+      />
+
+      {/* Footer com Formatação Brasileira Rigorosa */}
       <footer className="mt-auto border-t border-slate-200 bg-white py-6">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-3">
           <div className="flex items-center gap-2">
@@ -234,7 +303,7 @@ export default function App() {
             <span>Processo Uber Central vs Táxi Avulso — Acompanhamento Financeiro</span>
           </div>
           <div>
-            <span>Referência: R$ {taxiReferenceRate.toFixed(2)} por pedido de táxi · Economia de {accumulatedComparison.uber.costReductionPercent.toFixed(1)}%</span>
+            <span>Referência: {formatBRL(effectiveTaxiRate)} por pedido de táxi ({Math.round(activeScenario * 100)}% contratual) · Economia de {formatPercent(accumulatedComparison.uber.costReductionPercent)}</span>
           </div>
         </div>
       </footer>

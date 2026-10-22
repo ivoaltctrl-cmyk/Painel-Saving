@@ -1,6 +1,6 @@
 import React from 'react';
 import { ExecutiveBoardComparison } from '../types/mobility';
-import { TrendingUp, DollarSign, Users, Award, Percent, Car } from 'lucide-react';
+import { TrendingUp, DollarSign, Users, Award, Percent, Car, ArrowDownRight } from 'lucide-react';
 
 interface MetricCardsProps {
   comparison: ExecutiveBoardComparison;
@@ -15,11 +15,15 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ comparison }) => {
     });
   };
 
+  const formatPercent = (val: number) => {
+    return `${val.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+  };
+
   const totalEconomy = comparison.taxi.totalCost - comparison.uber.totalCost;
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-      {/* Card 1: Economia Acumulada (Saving Total) */}
+      {/* Card 1: Saving Acumulado */}
       <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-xs">
         <div className="flex items-center justify-between text-slate-500 mb-2">
           <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">
@@ -31,8 +35,9 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ comparison }) => {
           {formatBRL(totalEconomy)}
         </div>
         <div className="mt-2 text-xs text-slate-500 flex items-center gap-1.5 flex-wrap">
-          <span className="font-bold text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded">
-            -{comparison.uber.costReductionPercent.toFixed(1)}%
+          <span className="font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded flex items-center gap-1">
+            <ArrowDownRight className="w-3 h-3 text-emerald-600 inline" />
+            <span>{formatPercent(comparison.uber.costReductionPercent)}</span>
           </span>
           <span>de redução nos custos</span>
         </div>
@@ -50,7 +55,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ comparison }) => {
           {formatBRL(comparison.uber.totalCost)}
         </div>
         <div className="mt-2 text-xs text-slate-500 flex items-center gap-1.5 flex-wrap">
-          <span>Táxi:</span>
+          <span>Táxi Estimado:</span>
           <span className="line-through font-mono tabular-nums text-slate-400">
             {formatBRL(comparison.taxi.totalCost)}
           </span>
@@ -95,20 +100,23 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ comparison }) => {
         </div>
       </div>
 
-      {/* Card 5: Colaboradores Transportados */}
+      {/* Card 5: Passageiros Transportados */}
       <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-xs">
         <div className="flex items-center justify-between text-slate-500 mb-2">
           <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">
-            Total de Passageiros
+            Passageiros transportados
           </span>
           <Users className="w-4 h-4 text-slate-400" />
         </div>
         <div className="text-2xl font-bold font-mono tabular-nums text-slate-900">
           {comparison.uber.totalPassengers}
-          <span className="text-xs font-normal text-slate-500 ml-1">colaboradores</span>
+          <span className="text-xs font-normal text-slate-500 ml-1">passageiros</span>
         </div>
         <div className="mt-2 text-xs text-slate-500 flex items-center gap-1.5 flex-wrap">
-          <span>{comparison.uber.tripCount} pedidos com paradas</span>
+          <span>Colaboradores únicos:</span>
+          <strong className="text-slate-800 font-mono tabular-nums">
+            {comparison.uber.uniquePassengersCount}
+          </strong>
         </div>
       </div>
 

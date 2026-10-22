@@ -1,1 +1,63 @@
 @import "tailwindcss";
+
+@layer utilities {
+  @media print {
+    @page {
+      size: A4 portrait;
+      margin: 10mm;
+    }
+
+    body {
+      background-color: #ffffff !important;
+      color: #0f172a !important;
+      font-size: 11px !important;
+      line-height: 1.3 !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+
+    header,
+    nav,
+    button,
+    input,
+    select,
+    .no-print {
+      display: none !important;
+    }
+
+    main {
+      padding: 0 !important;
+      margin: 0 !important;
+      max-width: 100% !important;
+      width: 100% !important;
+    }
+
+    .shadow-xs,
+    .shadow-sm,
+    .shadow-md,
+    .shadow-lg,
+    .shadow-xl {
+      box-shadow: none !important;
+    }
+
+    .border {
+      border-color: #cbd5e1 !important;
+    }
+
+    /* Keep metric cards and tables fitting cleanly */
+    .grid {
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+    }
+
+    table {
+      font-size: 10px !important;
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+    }
+
+    th, td {
+      padding: 4px 6px !important;
+    }
+  }
+}
