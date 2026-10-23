@@ -5,7 +5,7 @@ import {
   Table2, 
   Code2, 
   RefreshCw,
-  Upload
+  UploadCloud
 } from 'lucide-react';
 
 export type DashboardTab = 'resumo' | 'evolucao' | 'corridas' | 'api';
@@ -13,7 +13,7 @@ export type DashboardTab = 'resumo' | 'evolucao' | 'corridas' | 'api';
 interface HeaderProps {
   activeTab: DashboardTab;
   onTabChange: (tab: DashboardTab) => void;
-  onUploadCsv: () => void;
+  onOpenDataUpdateModal: () => void;
   onSyncApi: () => void;
   isSyncing: boolean;
   lastSyncTime: string;
@@ -22,7 +22,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   activeTab,
   onTabChange,
-  onUploadCsv,
+  onOpenDataUpdateModal,
   onSyncApi,
   isSyncing,
   lastSyncTime,
@@ -30,9 +30,9 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="sticky top-0 z-40 bg-white border-b border-slate-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between gap-4 h-16">
+        <div className="flex items-center justify-between gap-3 h-16">
           {/* Zone 1: Wordmark */}
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2.5 shrink-0">
             <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center text-white font-bold text-sm shadow-xs">
               MS
             </div>
@@ -41,13 +41,13 @@ export const Header: React.FC<HeaderProps> = ({
                 MobilitySaving
               </span>
               <span className="text-[11px] text-slate-500 hidden sm:inline whitespace-nowrap">
-                Uber Central vs Táxi Avulso
+                Operação GRU · Uber vs Táxi
               </span>
             </div>
           </div>
 
           {/* Zone 2: Navigation Links - Compact, Single-line, No scrollbar */}
-          <nav className="flex items-center gap-1.5 py-1">
+          <nav className="flex items-center gap-1 py-1">
             <button
               onClick={() => onTabChange('resumo')}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md whitespace-nowrap transition-colors ${
@@ -106,16 +106,16 @@ export const Header: React.FC<HeaderProps> = ({
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-emerald-600' : 'text-slate-500'}`} />
-              <span className="hidden sm:inline">{isSyncing ? 'Atualizando...' : 'Recarregar'}</span>
+              <span className="hidden sm:inline">{isSyncing ? 'Sincronizando...' : 'Recarregar'}</span>
             </button>
 
             <button
-              onClick={onUploadCsv}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-md transition-colors whitespace-nowrap shrink-0"
-              title="Carregar nova exportação de planilha .CSV"
+              onClick={onOpenDataUpdateModal}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 border border-emerald-700 rounded-md transition-colors whitespace-nowrap shrink-0 shadow-xs"
+              title="Atualizar dados: subir arquivo CSV do dia 23, colar linhas ou sincronizar planilha"
             >
-              <Upload className="w-3.5 h-3.5 text-slate-700" />
-              <span className="hidden sm:inline">Upload CSV</span>
+              <UploadCloud className="w-4 h-4" />
+              <span>Atualizar Dados</span>
             </button>
           </div>
         </div>

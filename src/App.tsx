@@ -6,6 +6,7 @@ import { DailySavingChart } from './components/DailySavingChart';
 import { TripsTable } from './components/TripsTable';
 import { ApiIntegrationPanel } from './components/ApiIntegrationPanel';
 import { TariffManagementModal } from './components/TariffManagementModal';
+import { DataUpdateModal } from './components/DataUpdateModal';
 import { SheetsService } from './services/sheetsService';
 import { 
   ExecutiveBoardComparison, 
@@ -28,7 +29,7 @@ export default function App() {
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>('2026-10-22');
   const [isSyncing, setIsSyncing] = useState(false);
-  const [lastSyncTime, setLastSyncTime] = useState('22/10/2026 às 11:38');
+  const [lastSyncTime, setLastSyncTime] = useState('23/10/2026 às 10:22');
   const [taxiReferenceRate, setTaxiReferenceRate] = useState<number>(146.06);
   const [activeScenario, setActiveScenario] = useState<TaxiScenario>(1.0);
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('all');
@@ -50,9 +51,8 @@ export default function App() {
     month: '2026-10',
   });
   const [isTariffModalOpen, setIsTariffModalOpen] = useState(false);
+  const [isDataUpdateModalOpen, setIsDataUpdateModalOpen] = useState(false);
   const [globalNotice, setGlobalNotice] = useState<string | null>(null);
-
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const formatBRL = (val: number) => {
     return val.toLocaleString('pt-BR', {
@@ -66,8 +66,9 @@ export default function App() {
     return `${val.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
   };
 
-  const refreshData = useCallback(() => {
-    const reportData = SheetsService.getBoardReports(selectedDate);
+  const refreshData = useCallback((forcedDate?: string) => {
+    const targetDate = forcedDate || selectedDate;
+    const reportData = SheetsService.getBoardReports(targetDate);
     setTrips(reportData.allTrips);
     setPeriodTrips(reportData.periodTrips);
     setDailyComparison(reportData.dailyComparison);
@@ -82,6 +83,12 @@ export default function App() {
     setBreakdowns(reportData.breakdowns);
     setTargetConfig(reportData.targetConfig);
 
+    if (forcedDate) {
+      setSelectedDate(forcedDate);
+    } else if (!reportData.availableDates.includes(selectedDate) && reportData.availableDates.length > 0) {
+      setSelectedDate(reportData.availableDates[reportData.availableDates.length - 1]);
+    }
+
     const cfg = SheetsService.getConfig();
     setLastSyncTime(cfg.lastSyncedAt);
   }, [selectedDate]);
@@ -90,10 +97,13 @@ export default function App() {
   useEffect(() => {
     const init = async () => {
       await SheetsService.loadInitialData();
-      refreshData();
+      const existingTrips = SheetsService.getTrips();
+      const dates = Array.from(new Set(existingTrips.map(t => t.requestDateLocal).filter(Boolean))).sort();
+      const latest = dates[dates.length - 1] || '2026-10-22';
+      refreshData(latest);
     };
     init();
-  }, [refreshData]);
+  }, []);
 
   const handlePeriodFilterChange = (filter: PeriodFilter, customRange?: { start: string; end: string }) => {
     SheetsService.setPeriodFilter(filter, customRange);
@@ -106,39 +116,33 @@ export default function App() {
     try {
       const cfg = SheetsService.getConfig();
       if (cfg.sheetUrl) {
-        await SheetsService.syncFromGoogleSheets(cfg.sheetUrl);
-      } else {
-        await SheetsService.loadInitialData();
+        const res = await SheetsService.syncFromGoogleSheets(cfg.sheetUrl);
+        if (res.success) {
+          const latest = res.latestDate || (res.dates && res.dates[res.dates.length - 1]);
+          refreshData(latest);
+          setGlobalNotice(`Planilha sincronizada online com sucesso! ${res.count} atendimentos processados.`);
+          setTimeout(() => setGlobalNotice(null), 4000);
+          return;
+        }
       }
+      
+      // Fallback: recarrega base local
+      await SheetsService.loadInitialData();
       refreshData();
-      setGlobalNotice('Dados recarregados e reprocessados com sucesso!');
-      setTimeout(() => setGlobalNotice(null), 3500);
+      setGlobalNotice('Base de dados recarregada!');
+      setTimeout(() => setGlobalNotice(null), 3000);
     } finally {
       setTimeout(() => {
         setIsSyncing(false);
-      }, 600);
+      }, 500);
     }
   };
 
-  const handleGlobalFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      if (content) {
-        const res = SheetsService.importFromCsvText(content);
-        if (res.success) {
-          setGlobalNotice(`Planilha atualizada com sucesso! ${res.count} atendimentos processados.`);
-          refreshData();
-          setTimeout(() => setGlobalNotice(null), 4000);
-        } else {
-          alert(res.error || 'Erro ao processar arquivo CSV.');
-        }
-      }
-    };
-    reader.readAsText(file, 'utf-8');
+  // Callback quando novos dados são inseridos via modal
+  const handleDataUpdated = (latestDate?: string) => {
+    refreshData(latestDate);
+    setGlobalNotice(`Painel atualizado com sucesso! Exibindo dados mais recentes.`);
+    setTimeout(() => setGlobalNotice(null), 4000);
   };
 
   if (!dailyComparison || !accumulatedComparison) {
@@ -153,20 +157,11 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 font-sans text-slate-900">
-      {/* Hidden file input for header upload button */}
-      <input
-        type="file"
-        accept=".csv"
-        ref={fileInputRef}
-        onChange={handleGlobalFileUpload}
-        className="hidden"
-      />
-
-      {/* Top Bar Navigation (Clean, no horizontal scrollbars) */}
+      {/* Top Bar Navigation */}
       <Header
         activeTab={activeTab}
         onTabChange={setActiveTab}
-        onUploadCsv={() => fileInputRef.current?.click()}
+        onOpenDataUpdateModal={() => setIsDataUpdateModalOpen(true)}
         onSyncApi={handleSyncClick}
         isSyncing={isSyncing}
         lastSyncTime={lastSyncTime}
@@ -182,6 +177,7 @@ export default function App() {
           </div>
         )}
 
+
         {/* Context Strip with Brazilian Formatting */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-slate-500">
           <div className="flex items-center gap-2 flex-wrap">
@@ -195,8 +191,10 @@ export default function App() {
           <div className="flex items-center gap-3 flex-wrap">
             <span>Base total: <strong>{trips.length} atendimentos</strong></span>
             <span aria-hidden="true" className="text-slate-300">·</span>
+            <span>Dias na base: <strong>{availableDates.map(d => d.split('-').reverse().slice(0, 2).join('/')).join(', ')}</strong></span>
+            <span aria-hidden="true" className="text-slate-300">·</span>
             <span className="font-mono tabular-nums text-[11px] text-slate-600">
-              Ref. Táxi: {formatBRL(effectiveTaxiRate)}/pedido ({Math.round(activeScenario * 100)}% do contrato)
+              Ref. Táxi: {formatBRL(effectiveTaxiRate)}/pedido ({Math.round(activeScenario * 100)}% contratual)
             </span>
           </div>
         </div>
@@ -213,7 +211,7 @@ export default function App() {
               availableDates={availableDates}
               selectedDate={selectedDate}
               onSelectDate={(date) => setSelectedDate(date)}
-              onDataRefresh={refreshData}
+              onDataRefresh={() => refreshData()}
               onOpenTariffModal={() => setIsTariffModalOpen(true)}
               lastSyncTime={lastSyncTime}
               periodFilter={periodFilter}
@@ -273,7 +271,7 @@ export default function App() {
           <div className="space-y-6">
             <TripsTable
               trips={trips}
-              onDataRefresh={refreshData}
+              onDataRefresh={() => refreshData()}
               taxiReferenceRate={effectiveTaxiRate}
             />
           </div>
@@ -287,11 +285,18 @@ export default function App() {
         )}
       </main>
 
+      {/* Modal de Atualização de Dados e Dia 23 */}
+      <DataUpdateModal
+        isOpen={isDataUpdateModalOpen}
+        onClose={() => setIsDataUpdateModalOpen(false)}
+        onDataUpdated={handleDataUpdated}
+      />
+
       {/* Modal de Gestão de Tarifas e Vigências com Auditoria */}
       <TariffManagementModal
         isOpen={isTariffModalOpen}
         onClose={() => setIsTariffModalOpen(false)}
-        onTariffUpdated={refreshData}
+        onTariffUpdated={() => refreshData()}
       />
 
       {/* Footer com Formatação Brasileira Rigorosa */}

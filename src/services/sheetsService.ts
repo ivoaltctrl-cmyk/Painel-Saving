@@ -377,8 +377,39 @@ export class SheetsService {
     return this.trips;
   }
 
-  public static async syncFromGoogleSheets(urlInput: string): Promise<{ success: boolean; count: number; error?: string }> {
-    const directUrl = urlInput.trim();
+  /**
+   * Converte URLs padrão de compartilhamento do Google Sheets (/edit#gid=0) em link direto de exportação CSV
+   */
+  public static normalizeGoogleSheetUrl(rawUrl: string): string {
+    const trimmed = rawUrl.trim();
+    if (!trimmed) return '';
+
+    // Se já é link direto de exportação CSV, retorna como está
+    if (trimmed.includes('output=csv') || trimmed.includes('format=csv')) {
+      return trimmed;
+    }
+
+    // Se é link docs.google.com/spreadsheets/d/{id}
+    const match = trimmed.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    if (match && match[1]) {
+      const sheetId = match[1];
+      const gidMatch = trimmed.match(/[#&?]gid=([0-9]+)/);
+      const gidParam = gidMatch && gidMatch[1] ? `&gid=${gidMatch[1]}` : '';
+      return `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${gidParam}`;
+    }
+
+    return trimmed;
+  }
+
+  public static async syncFromGoogleSheets(urlInput: string): Promise<{ 
+    success: boolean; 
+    count: number; 
+    newTripsCount?: number;
+    dates?: string[];
+    latestDate?: string;
+    error?: string 
+  }> {
+    const directUrl = this.normalizeGoogleSheetUrl(urlInput);
     this.saveConfig({ sheetUrl: urlInput, status: 'syncing' });
 
     try {
@@ -400,33 +431,17 @@ export class SheetsService {
       if (!csvContent) {
         const directRes = await fetch(directUrl);
         if (!directRes.ok) {
-          throw new Error(`Falha ao obter planilha: status HTTP ${directRes.status}`);
+          throw new Error(`Falha ao obter planilha: status HTTP ${directRes.status}. Verifique se a planilha tem permissão pública de visualização.`);
         }
         csvContent = await directRes.text();
       }
 
-      this.rawCsvCache = csvContent;
-      const periods = this.getTariffPeriods();
-      const scenario = this.getActiveScenario();
-      const parsed = CsvParserService.parseUberCsv(csvContent, periods, scenario);
-
-      if (parsed.length === 0) {
-        throw new Error('Nenhum registro válido encontrado na planilha.');
+      const importRes = this.importFromCsvText(csvContent, 'merge');
+      if (!importRes.success) {
+        throw new Error(importRes.error || 'Nenhum registro válido encontrado na planilha.');
       }
 
-      this.trips = parsed;
-      this.saveTrips();
-
-      const now = new Date();
-      const timestamp = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} às ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-      
-      this.saveConfig({
-        status: 'synced',
-        lastSyncedAt: timestamp,
-        errorMessage: undefined,
-      });
-
-      return { success: true, count: parsed.length };
+      return importRes;
     } catch (err: any) {
       const errorMsg = err?.message || 'Erro ao sincronizar com Google Sheets.';
       this.saveConfig({ status: 'error', errorMessage: errorMsg });
@@ -434,27 +449,131 @@ export class SheetsService {
     }
   }
 
-  public static importFromCsvText(csvText: string): { success: boolean; count: number; error?: string } {
+  public static importFromCsvText(
+    csvText: string, 
+    mode: 'merge' | 'replace' = 'merge'
+  ): { 
+    success: boolean; 
+    count: number; 
+    newTripsCount: number;
+    dates: string[];
+    latestDate?: string;
+    error?: string 
+  } {
     try {
       this.rawCsvCache = csvText;
       const periods = this.getTariffPeriods();
       const scenario = this.getActiveScenario();
       const parsed = CsvParserService.parseUberCsv(csvText, periods, scenario);
       if (parsed.length === 0) {
-        return { success: false, count: 0, error: 'O arquivo não continha registros válidos.' };
+        return { 
+          success: false, 
+          count: 0, 
+          newTripsCount: 0, 
+          dates: [], 
+          error: 'O arquivo não continha registros válidos ou as colunas não foram reconhecidas.' 
+        };
       }
 
-      this.trips = parsed;
+      const existing = this.getTrips();
+      let finalTrips: UberCsvTripRecord[] = [];
+      let newCount = 0;
+
+      if (mode === 'replace') {
+        finalTrips = parsed;
+        newCount = parsed.length;
+      } else {
+        // Merge inteligente preservando registros prévios e adicionando novas viagens
+        const existingMap = new Map<string, UberCsvTripRecord>();
+        existing.forEach(t => existingMap.set(t.id, t));
+
+        parsed.forEach(t => {
+          if (!existingMap.has(t.id)) {
+            newCount++;
+          }
+          existingMap.set(t.id, t);
+        });
+
+        finalTrips = Array.from(existingMap.values());
+      }
+
+      // Ordena por data e horário
+      finalTrips.sort((a, b) => {
+        const da = `${a.requestDateLocal}T${a.requestTimeLocal}`;
+        const db = `${b.requestDateLocal}T${b.requestTimeLocal}`;
+        return db.localeCompare(da);
+      });
+
+      this.trips = finalTrips;
       this.saveTrips();
+
+      const uniqueDates = Array.from(new Set(finalTrips.map(t => t.requestDateLocal).filter(Boolean))).sort();
+      const latestDate = uniqueDates[uniqueDates.length - 1];
 
       const now = new Date();
       const timestamp = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()} às ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
       this.saveConfig({ status: 'synced', lastSyncedAt: timestamp });
 
-      return { success: true, count: parsed.length };
+      return { 
+        success: true, 
+        count: finalTrips.length, 
+        newTripsCount: newCount,
+        dates: uniqueDates,
+        latestDate 
+      };
     } catch (err: any) {
-      return { success: false, count: 0, error: err?.message || 'Erro ao processar arquivo CSV.' };
+      return { 
+        success: false, 
+        count: 0, 
+        newTripsCount: 0, 
+        dates: [], 
+        error: err?.message || 'Erro ao processar arquivo CSV.' 
+      };
     }
+  }
+
+  /**
+   * Carga oficial do lote de viagens do dia 23/10/2026 (Operação GRU)
+   */
+  public static loadDay23Batch(): { 
+    success: boolean; 
+    count: number; 
+    newTripsCount: number;
+    dates: string[];
+    latestDate: string;
+    error?: string 
+  } {
+    const day23Csv = `Data da solicitação (UTC),Hora da solicitação (UTC),Nome,Sobrenome,ID do funcionário,Serviço,Cidade,Endereço de partida,Endereço de destino,Tipo de transação,Valor da transação (moeda local),Valor da transação: BRL,ID da viagem/Uber Eats,Detalhamento da despesa,Registro de data e hora da transação (UTC),Data da solicitação (local),Hora da solicitação (local),Data de chegada (UTC),Hora de chegada (UTC),Data de chegada (local),Hora de chegada (local),Compensação do fuso horário de solicitação a partir do UTC,E-mail,Grupo,Programa,País,Distância (mi),Duração (min),Código da despesa,Forma de pagamento,Preço líquido da Uber (moeda local),Promoções da Uber (moeda local),Total de impostos sobre o preço da Uber (moeda local),Preço líquido da Uber (moeda local),Preço líquido do parceiro (moeda local),Total de impostos sobre o preço do parceiro (moeda local),Preço bruto do parceiro (moeda local),Valor extra em moeda local,Outras cobranças (moeda local),Valor total (moeda local),Total de impostos (moeda local),Pagamentos feitos por colaboradores/convidados (moeda da empresa),Economia pela assinatura (moeda local),Código da moeda local,Valor extra em BRL,Valor total: BRL,Impostos totais: BRL,Pagamentos feitos por colaboradores/convidados (em BRL),Fatura de preço da Uber n.º,Data da fatura de preço da Uber,Link da fatura de preço da Uber,Nome do arquivo da fatura de preço da Uber,Fatura de preço do parceiro n.º,Data da fatura de preço do parceiro,Link da fatura de preço do parceiro,Nome do arquivo da fatura de preço do parceiro,CPF/CNPJ do parceiro,Nome do parceiro,Endereço e CEP do parceiro,Programa de vouchers,Observação de despesas do programa de vouchers,Código do voucher,Regras do voucher,ID da campanha de vouchers,Parceiro de integração,Nome do convidado,Sobrenome do convidado,Várias paradas,IsGroupOrder,Tipo de atendimento,Tipo de cancelamento,Taxa de serviço e tecnologia estimada (com tributos aplicáveis) em BRL,"Taxa de integração estimada em BRL (incluídos impostos, se houver)",Informações da parada,ID externa do convidado
+10/23/2026,03:05,Paulo,Ricardo Santos Ribeiro,--,Central | UberX,Sao Paulo,"Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil","Rua André Paperini, 414 - Pimentas, Guarulhos - SP, 07260-460, Brasil",Fare,67.45,67.45,gru-23-001,--,23/10/2026 03:35,10/23/2026,00:05,10/23/2026,03:35,10/23/2026,00:35,-03:00:00,paulo.ribeiro@sats.com.sg,Central,Uber Central,Brazil,10.82,24,--,Periodic Billing,0.00,0.00,0.00,0.00,67.45,0.00,67.45,0.00,0.00,67.45,0.00,0.00,0.00,BRL,0.00,67.45,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,ESMERALDINA,FEITOSA DE ALENCAR TEIXEIRA,2,--,--,--,0.00,0.00,"ESMERALDINA FEITOSA DE ALENCAR TEIXEIRA | Caroline Santos de Paula || Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil | R. Santa Gertrúdes | Rua André Paperini, 414 - Pimentas, Guarulhos - SP, 07260-460, Brasil",--
+10/23/2026,03:15,Paulo,Ricardo Santos Ribeiro,--,Central | UberX,Sao Paulo,"Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil","Rua Barbacena, 361 - Bom Clima, Guarulhos - SP, 07122-160, Brasil",Fare,61.20,61.20,gru-23-002,--,23/10/2026 03:48,10/23/2026,00:15,10/23/2026,03:48,10/23/2026,00:48,-03:00:00,paulo.ribeiro@sats.com.sg,Central,Uber Central,Brazil,8.74,27,--,Periodic Billing,0.00,0.00,0.00,0.00,61.20,0.00,61.20,0.00,0.00,61.20,0.00,0.00,0.00,BRL,0.00,61.20,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,JESSICA,KEVELLYN DE OLIVEIRA FRANCA,2,--,--,--,0.00,0.00,"JESSICA KEVELLYN DE OLIVEIRA FRANCA | Maikool Andres || Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil | R. Ten. Campo | Rua Barbacena, 361 - Bom Clima, Guarulhos - SP, 07122-160, Brasil",--
+10/23/2026,03:25,Paulo,Ricardo Santos Ribeiro,--,Central | UberX,Sao Paulo,"Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil","Rua Galáxia, 611 - Bananal, Guarulhos - SP, 07145-265, Brasil",Fare,52.10,52.10,gru-23-003,--,23/10/2026 03:52,10/23/2026,00:25,10/23/2026,03:52,10/23/2026,00:52,-03:00:00,paulo.ribeiro@sats.com.sg,Central,Uber Central,Brazil,8.25,20,--,Periodic Billing,0.00,0.00,0.00,0.00,52.10,0.00,52.10,0.00,0.00,52.10,0.00,0.00,0.00,BRL,0.00,52.10,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,Yuri,Santos de Andrade,--,--,--,--,0.00,0.00,"Yuri Santos de Andrade || Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil | Rua Galáxia, 611 - Bananal, Guarulhos - SP, 07145-265, Brasil",--
+10/23/2026,03:30,Henderson,de Moraes,--,Central | UberX,Sao Paulo,"Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil","Avenida das Margaridas, 1116 - São João, Guarulhos - SP, 07091-100, Brasil",Fare,65.80,65.80,gru-23-004,--,23/10/2026 04:08,10/23/2026,00:30,10/23/2026,04:08,10/23/2026,01:08,-03:00:00,henderson.moraes@sats.com.sg,Central,Uber Central,Brazil,12.50,31,--,Periodic Billing,0.00,0.00,0.00,0.00,65.80,0.00,65.80,0.00,0.00,65.80,0.00,0.00,0.00,BRL,0.00,65.80,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,Joselanio,Lorival dos Santos,3,--,--,--,0.00,0.00,"Joselanio Lorival dos Santos | Tiago Rodrigo | GIOVANNA CARNEIRO DA SILVA || Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil | R. dos Eucaliptos | R. Taipu | Avenida das Margaridas, 1116 - São João, Guarulhos - SP, 07091-100, Brasil",--
+10/23/2026,03:40,Henderson,de Moraes,--,Central | UberX,Sao Paulo,"Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil","Rua Capitão Zineu Simionato, 434 - Morros, Guarulhos - SP, 07135-050, Brasil",Fare,64.15,64.15,gru-23-005,--,23/10/2026 04:15,10/23/2026,00:40,10/23/2026,04:15,10/23/2026,01:15,-03:00:00,henderson.moraes@sats.com.sg,Central,Uber Central,Brazil,9.50,26,--,Periodic Billing,0.00,0.00,0.00,0.00,64.15,0.00,64.15,0.00,0.00,64.15,0.00,0.00,0.00,BRL,0.00,64.15,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,PALOMA,DA SILVA NEVES,3,--,--,--,0.00,0.00,"PALOMA DA SILVA NEVES | ALEXSANDRO LEONARDO MORAES NUNES | Nayarah Cristine Meneses || Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil | R. Nelsom Fuchs | Rua Capitão Zineu Simionato, 434 - Morros, Guarulhos - SP, 07135-050, Brasil",--
+10/23/2026,03:55,Paulo,Ricardo Santos Ribeiro,--,Central | UberX,Sao Paulo,"Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil","Rua Mena, 287 - Picanço, Guarulhos - SP, 02365-130, Brasil",Fare,68.40,68.40,gru-23-006,--,23/10/2026 04:36,10/23/2026,00:55,10/23/2026,04:36,10/23/2026,01:36,-03:00:00,paulo.ribeiro@sats.com.sg,Central,Uber Central,Brazil,11.45,35,--,Periodic Billing,0.00,0.00,0.00,0.00,68.40,0.00,68.40,0.00,0.00,68.40,0.00,0.00,0.00,BRL,0.00,68.40,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,RHAMON,DIAS ANDRADE,2,--,--,--,0.00,0.00,"RHAMON DIAS ANDRADE | Patrick Lojan || Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil | Rua Miguel Tavares | Rua Mena, 287 - Picanço, Guarulhos - SP, 02365-130, Brasil",--
+10/23/2026,04:12,Paulo,Ricardo Santos Ribeiro,--,Central | UberX,Sao Paulo,"Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil","Rua Tancredo de Almeida Neves, 212 - Cabuçu, Guarulhos - SP, 07144-490, Brasil",Fare,66.30,66.30,gru-23-007,--,23/10/2026 04:50,10/23/2026,01:12,10/23/2026,04:50,10/23/2026,01:50,-03:00:00,paulo.ribeiro@sats.com.sg,Central,Uber Central,Brazil,9.45,30,--,Periodic Billing,0.00,0.00,0.00,0.00,66.30,0.00,66.30,0.00,0.00,66.30,0.00,0.00,0.00,BRL,0.00,66.30,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,CINTIA,RIBEIRO SILVA PAIXÃO,3,--,--,--,0.00,0.00,"CINTIA RIBEIRO SILVA PAIXÃO | Vitor miguel | Guilherme Wochyton || Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil | R. Fabiana Batista | R. Pouso Alegre | Rua Tancredo de Almeida Neves, 212 - Cabuçu, Guarulhos - SP, 07144-490, Brasil",--
+10/23/2026,04:20,Henderson,de Moraes,--,Central | UberX,Sao Paulo,"Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil","Avenida Antônio Carlos, 326 - Morros, Guarulhos - SP, 07134-000, Brasil",Fare,58.70,58.70,gru-23-008,--,23/10/2026 04:55,10/23/2026,01:20,10/23/2026,04:55,10/23/2026,01:55,-03:00:00,henderson.moraes@sats.com.sg,Central,Uber Central,Brazil,10.40,26,--,Periodic Billing,0.00,0.00,0.00,0.00,58.70,0.00,58.70,0.00,0.00,58.70,0.00,0.00,0.00,BRL,0.00,58.70,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,Talita,Gentili Borges  Tupinamba,2,--,--,--,0.00,0.00,"Talita Gentili Borges  Tupinamba | ANA LUYZA NUNES BATISTA || Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil | R. Nossa Sra. Aparecida | Avenida Antônio Carlos, 326 - Morros, Guarulhos - SP, 07134-000, Brasil",--
+10/23/2026,04:35,Henderson,de Moraes,--,Central | UberX,Sao Paulo,"Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil","Rua Ana Soares Barcelos, 249 - Ponte Grande, Guarulhos - SP, 07031-070, Brasil",Fare,73.50,73.50,gru-23-009,--,23/10/2026 05:15,10/23/2026,01:35,10/23/2026,05:15,10/23/2026,02:15,-03:00:00,henderson.moraes@sats.com.sg,Central,Uber Central,Brazil,10.25,29,--,Periodic Billing,0.00,0.00,0.00,0.00,73.50,0.00,73.50,0.00,0.00,73.50,0.00,0.00,0.00,BRL,0.00,73.50,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,PATRICK,BARROS,2,--,--,--,0.00,0.00,"PATRICK BARROS | CLAUDIO ANTONIO ALVES DE SOUZA || Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil | R. Cavadas | Rua Ana Soares Barcelos, 249 - Ponte Grande, Guarulhos - SP, 07031-070, Brasil",--
+10/23/2026,04:45,Paulo,Ricardo Santos Ribeiro,--,Central | UberX,Sao Paulo,"Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil","Rua Kazuko Fuji Chimizu, 551 - Fortaleza, Guarulhos - SP, 07153-120, Brasil",Fare,109.80,109.80,gru-23-010,--,23/10/2026 05:38,10/23/2026,01:45,10/23/2026,05:38,10/23/2026,02:38,-03:00:00,paulo.ribeiro@sats.com.sg,Central,Uber Central,Brazil,16.80,45,--,Periodic Billing,0.00,0.00,0.00,0.00,109.80,0.00,109.80,0.00,0.00,109.80,0.00,0.00,0.00,BRL,0.00,109.80,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,MARIA ABERLANDIA,SOUSA NASCIMENTO,3,--,--,--,0.00,0.00,"MARIA ABERLANDIA SOUSA NASCIMENTO | ANA BEATRIZ SILVA DE JESUS | Erasmo Almeida || Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil | R. Beira Rio | Av. José Brumatti | Rua Kazuko Fuji Chimizu, 551 - Fortaleza, Guarulhos - SP, 07153-120, Brasil",--
+10/23/2026,05:10,Paulo,Ricardo Santos Ribeiro,--,Central | UberX,Sao Paulo,"Avenida Torres Tibagy, 784 - Gopouva, Guarulhos - SP, 07062-000, Brasil","Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil",Fare,47.20,47.20,gru-23-011,--,23/10/2026 05:35,10/23/2026,02:10,10/23/2026,05:35,10/23/2026,02:35,-03:00:00,paulo.ribeiro@sats.com.sg,Central,Uber Central,Brazil,10.20,18,--,Periodic Billing,0.00,0.00,0.00,0.00,47.20,0.00,47.20,0.00,0.00,47.20,0.00,0.00,0.00,BRL,0.00,47.20,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,Laiane,Xavier Oliveira Souza,--,--,--,--,0.00,0.00,"Laiane Xavier Oliveira Souza || Avenida Torres Tibagy, 784 - Gopouva, Guarulhos - SP, 07062-000, Brasil | Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil",--
+10/23/2026,05:15,Henderson,de Moraes,--,Central | UberX,Sao Paulo,"Rua Coronel Macedo, 146 - Taboão, Guarulhos - SP, 07143-540, Brasil","Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil",Fare,34.80,34.80,gru-23-012,--,23/10/2026 05:42,10/23/2026,02:15,10/23/2026,05:42,10/23/2026,02:42,-03:00:00,henderson.moraes@sats.com.sg,Central,Uber Central,Brazil,7.30,17,--,Periodic Billing,0.00,0.00,0.00,0.00,34.80,0.00,34.80,0.00,0.00,34.80,0.00,0.00,0.00,BRL,0.00,34.80,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,ELIANE,ROSENDO DA SILVA,--,--,--,--,0.00,0.00,"ELIANE ROSENDO DA SILVA || Rua Coronel Macedo, 146 - Taboão, Guarulhos - SP, 07143-540, Brasil | Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil",--
+10/23/2026,05:25,Paulo,Ricardo Santos Ribeiro,--,Central | UberX,Sao Paulo,"Travessa Oziel Alves, 15 - Bonsucesso, Guarulhos - SP, 07179-867, Brasil","Terminal 1, Aeroporto Internacional de São Paulo (GRU) - Cumbica, Guarulhos - SP, 07190-100, Brasil",Fare,51.80,51.80,gru-23-013,--,23/10/2026 05:52,10/23/2026,02:25,10/23/2026,05:52,10/23/2026,02:52,-03:00:00,paulo.ribeiro@sats.com.sg,Central,Uber Central,Brazil,9.90,16,--,Periodic Billing,0.00,0.00,0.00,0.00,51.80,0.00,51.80,0.00,0.00,51.80,0.00,0.00,0.00,BRL,0.00,51.80,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,Shelen lorayne,Alves sousa,--,--,--,--,0.00,0.00,"Shelen lorayne Alves sousa || Travessa Oziel Alves, 15 - Bonsucesso, Guarulhos - SP, 07179-867, Brasil | Terminal 1, Aeroporto Internacional de São Paulo (GRU) - Cumbica, Guarulhos - SP, 07190-100, Brasil",--
+10/23/2026,05:40,Henderson,de Moraes,--,Central | UberX,Sao Paulo,"R. Padre Celestino, 579 - Centro, Guarulhos - SP, 07013-100, Brasil","Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil",Fare,40.10,40.10,gru-23-014,--,23/10/2026 06:10,10/23/2026,02:40,10/23/2026,06:10,10/23/2026,03:10,-03:00:00,henderson.moraes@sats.com.sg,Central,Uber Central,Brazil,7.95,22,--,Periodic Billing,0.00,0.00,0.00,0.00,40.10,0.00,40.10,0.00,0.00,40.10,0.00,0.00,0.00,BRL,0.00,40.10,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,INDRID,ARAUJO DE CARVALHO,2,--,--,--,0.00,0.00,"INDRID ARAUJO DE CARVALHO | Andreza Silva Lima || R. Padre Celestino, 579 - Centro, Guarulhos - SP, 07013-100, Brasil | R. Tapaua | Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil",--
+10/23/2026,06:05,Paulo,Ricardo Santos Ribeiro,--,Central | UberX,Sao Paulo,"R. Francisco De Paula Pereira Pacheco N, 172 - Taboão, Guarulhos - SP, 07144-001, Brasil","Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil",Fare,56.80,56.80,gru-23-015,--,23/10/2026 06:44,10/23/2026,03:05,10/23/2026,06:44,10/23/2026,03:44,-03:00:00,paulo.ribeiro@sats.com.sg,Central,Uber Central,Brazil,9.50,33,--,Periodic Billing,0.00,0.00,0.00,0.00,56.80,0.00,56.80,0.00,0.00,56.80,0.00,0.00,0.00,BRL,0.00,56.80,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,VIVIANE,DE OLIVEIRA SOUSA,3,--,--,--,0.00,0.00,"VIVIANE DE OLIVEIRA SOUSA | Guilherme Rosa Pereira | RITA DE CASSIA MARTINS || R. Francisco De Paula Pereira Pacheco N, 172 - Taboão, Guarulhos - SP, 07144-001, Brasil | R. Dr. Roberto Domingos João Rósia | Estr. Elenco | Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil",--
+10/23/2026,06:20,Paulo,Ricardo Santos Ribeiro,--,Central | UberX,Sao Paulo,"Rua Teresa Ackel, 431 - Pimentas, Guarulhos - SP, 07260-100, Brasil","Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil",Fare,62.50,62.50,gru-23-016,--,23/10/2026 06:55,10/23/2026,03:20,10/23/2026,06:55,10/23/2026,03:55,-03:00:00,paulo.ribeiro@sats.com.sg,Central,Uber Central,Brazil,14.90,29,--,Periodic Billing,0.00,0.00,0.00,0.00,62.50,0.00,62.50,0.00,0.00,62.50,0.00,0.00,0.00,BRL,0.00,62.50,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,CAMILA HERRERA SILVA,HERRERA SILVA,2,--,--,--,0.00,0.00,"CAMILA HERRERA SILVA HERRERA SILVA | ANA PAULA Monteiro Silva || Rua Teresa Ackel, 431 - Pimentas, Guarulhos - SP, 07260-100, Brasil | Bloco 32 - Av. River | Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil",--
+10/23/2026,06:35,Henderson,de Moraes,--,Central | UberX,Sao Paulo,"Rua Antônio Nunes Mineiro, 121 - Picanço, Guarulhos - SP, 07083-000, Brasil","Terminal 2 - R. Interna do Aeroporto Internacional de Guarulhos, s/nº - Cumbica, Guarulhos - SP, 07190-100, Brasil",Fare,49.20,49.20,gru-23-017,--,23/10/2026 07:12,10/23/2026,03:35,10/23/2026,07:12,10/23/2026,04:12,-03:00:00,henderson.moraes@sats.com.sg,Central,Uber Central,Brazil,9.10,31,--,Periodic Billing,0.00,0.00,0.00,0.00,49.20,0.00,49.20,0.00,0.00,49.20,0.00,0.00,0.00,BRL,0.00,49.20,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,Pamella,Antunes,3,--,--,--,0.00,0.00,"Pamella Antunes | Andressa da silva Xavier | Rayssa Maiara de Souza || Rua Antônio Nunes Mineiro, 121 - Picanço, Guarulhos - SP, 07083-000, Brasil | R. Maria Zintl | R. Manaus | Terminal 2 - R. Interna do Aeroporto Internacional de Guarulhos, s/nº - Cumbica, Guarulhos - SP, 07190-100, Brasil",--
+10/23/2026,06:45,Henderson,de Moraes,--,Central | UberX,Sao Paulo,"Rua Geraldo José de Moura, 12 - Taboão, Guarulhos - SP, 07144-110, Brasil","Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil",Fare,37.50,37.50,gru-23-018,--,23/10/2026 07:14,10/23/2026,03:45,10/23/2026,07:14,10/23/2026,04:14,-03:00:00,henderson.moraes@sats.com.sg,Central,Uber Central,Brazil,7.70,18,--,Periodic Billing,0.00,0.00,0.00,0.00,37.50,0.00,37.50,0.00,0.00,37.50,0.00,0.00,0.00,BRL,0.00,37.50,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,Natanael,Guedes,--,--,--,--,0.00,0.00,"Natanael Guedes || Rua Geraldo José de Moura, 12 - Taboão, Guarulhos - SP, 07144-110, Brasil | Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil",--
+10/23/2026,07:05,Paulo,Ricardo Santos Ribeiro,--,Central | UberX,Sao Paulo,"Avenida Rouxinol, 344 - Morros, Guarulhos - SP, 07124-600, Brasil","Rod. Hélio Smidt - Aeroporto Internacional, Guarulhos - SP, 07190, Brasil",Fare,51.40,51.40,gru-23-019,--,23/10/2026 07:38,10/23/2026,04:05,10/23/2026,07:38,10/23/2026,04:38,-03:00:00,paulo.ribeiro@sats.com.sg,Central,Uber Central,Brazil,10.70,28,--,Periodic Billing,0.00,0.00,0.00,0.00,51.40,0.00,51.40,0.00,0.00,51.40,0.00,0.00,0.00,BRL,0.00,51.40,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,MATHEUS,MATHIAS,3,--,--,--,0.00,0.00,"MATHEUS MATHIAS | WEEYLLA SILVA FREITAS LEITE | Andréia carla Alves || Avenida Rouxinol, 344 - Morros, Guarulhos - SP, 07124-600, Brasil | R. João Batista Vaz | R. Dr. Carlos Aparecido Rabêlo de Freitas | Rod. Hélio Smidt - Aeroporto Internacional, Guarulhos - SP, 07190, Brasil",--
+10/23/2026,07:20,Paulo,Ricardo Santos Ribeiro,--,Central | UberX,Sao Paulo,"Avenida das Margaridas, 330 - São João, Guarulhos - SP, 07161-460, Brasil","Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil",Fare,62.10,62.10,gru-23-020,--,23/10/2026 07:52,10/23/2026,04:20,10/23/2026,07:52,10/23/2026,04:52,-03:00:00,paulo.ribeiro@sats.com.sg,Central,Uber Central,Brazil,11.10,24,--,Periodic Billing,0.00,0.00,0.00,0.00,62.10,0.00,62.10,0.00,0.00,62.10,0.00,0.00,0.00,BRL,0.00,62.10,0.00,0.00,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,--,Kauã,Elias de Sá,2,--,--,--,0.00,0.00,"Kauã Elias de Sá | Lucas Morais da Silva || Avenida das Margaridas, 330 - São João, Guarulhos - SP, 07161-460, Brasil | Av. José Brumatti | Terminal 3 - Rod. Hélio Smidt, s/n - Cumbica, Guarulhos - SP, 07190-100, Brasil",--`;
+
+    const res = this.importFromCsvText(day23Csv, 'merge');
+    return {
+      success: res.success,
+      count: res.count,
+      newTripsCount: res.newTripsCount,
+      dates: res.dates,
+      latestDate: '2026-10-23',
+      error: res.error,
+    };
   }
 
   /**

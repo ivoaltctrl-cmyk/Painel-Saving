@@ -10,9 +10,28 @@ import {
 
 export class CsvParserService {
   /**
-   * Divide uma linha de CSV respeitando aspas duplas
+   * Detecta se o CSV utiliza ponto-e-vírgula (padrão Excel Brasil) ou vírgula
    */
-  public static parseCsvLine(line: string): string[] {
+  public static detectDelimiter(firstLine: string): string {
+    let inQuotes = false;
+    let commas = 0;
+    let semicolons = 0;
+
+    for (let i = 0; i < firstLine.length; i++) {
+      const char = firstLine[i];
+      if (char === '"') inQuotes = !inQuotes;
+      else if (!inQuotes) {
+        if (char === ';') semicolons++;
+        else if (char === ',') commas++;
+      }
+    }
+    return semicolons > commas ? ';' : ',';
+  }
+
+  /**
+   * Divide uma linha de CSV respeitando aspas duplas e o delimitador detectado
+   */
+  public static parseCsvLine(line: string, delimiter: string = ','): string[] {
     const result: string[] = [];
     let cur = '';
     let inQuotes = false;
@@ -26,7 +45,7 @@ export class CsvParserService {
         } else {
           inQuotes = !inQuotes;
         }
-      } else if (char === ',' && !inQuotes) {
+      } else if (char === delimiter && !inQuotes) {
         result.push(cur.trim());
         cur = '';
       } else {
@@ -38,20 +57,64 @@ export class CsvParserService {
   }
 
   /**
-   * Converte texto de data MM/DD/YYYY para YYYY-MM-DD
+   * Converte texto de data (DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, com ou sem horário) para YYYY-MM-DD
    */
   public static parseDateToIso(dateStr: string): string {
     if (!dateStr || dateStr === '--') return '';
-    if (dateStr.includes('/')) {
-      const parts = dateStr.split('/');
+    const trimmed = dateStr.trim();
+    // Remove parte de horário se presente (ex: "23/10/2026 04:00" -> "23/10/2026")
+    const dateOnly = trimmed.split(/[ T]/)[0];
+
+    if (dateOnly.includes('/')) {
+      const parts = dateOnly.split('/');
       if (parts.length === 3) {
-        const month = parts[0].padStart(2, '0');
-        const day = parts[1].padStart(2, '0');
-        const year = parts[2];
+        const p0 = parseInt(parts[0], 10);
+        const p1 = parseInt(parts[1], 10);
+        let year = parts[2].trim();
+        if (year.length === 2) year = `20${year}`;
+
+        // Se o primeiro número for > 12, com certeza é DIA (ex: 23/10/2026)
+        if (p0 > 12) {
+          const day = String(p0).padStart(2, '0');
+          const month = String(p1).padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        }
+        // Se o segundo número for > 12, com certeza é DIA e o primeiro é MÊS (ex: 10/23/2026)
+        if (p1 > 12) {
+          const month = String(p0).padStart(2, '0');
+          const day = String(p1).padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        }
+        // Se ambos <= 12 e o ano tem 4 dígitos: no Brasil, se veio de exportação Uber em PT-BR,
+        // pode ser DD/MM/YYYY ou MM/DD/YYYY. Se o mês 10/21/2026 era MM/DD/YYYY nos arquivos anteriores:
+        // Mantemos coerência: se p0 for 10 e p1 for <= 31, no Uber original era MM/DD/YYYY.
+        // Mas se for 23, p0 > 12 cai na regra acima garantindo 2026-10-23!
+        const month = String(p0).padStart(2, '0');
+        const day = String(p1).padStart(2, '0');
         return `${year}-${month}-${day}`;
       }
     }
-    return dateStr;
+
+    if (dateOnly.includes('-')) {
+      const parts = dateOnly.split('-');
+      if (parts.length === 3) {
+        if (parts[0].length === 4) {
+          // YYYY-MM-DD
+          return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+        } else if (parts[2].length === 4) {
+          // DD-MM-YYYY
+          const p0 = parseInt(parts[0], 10);
+          const p1 = parseInt(parts[1], 10);
+          const year = parts[2].trim();
+          if (p0 > 12) {
+            return `${year}-${String(p1).padStart(2, '0')}-${String(p0).padStart(2, '0')}`;
+          }
+          return `${year}-${String(p1).padStart(2, '0')}-${String(p0).padStart(2, '0')}`;
+        }
+      }
+    }
+
+    return dateOnly;
   }
 
   /**
@@ -168,39 +231,58 @@ export class CsvParserService {
     const rawLines = csvText.split(/\r?\n/).filter(l => l.trim().length > 0);
     if (rawLines.length < 2) return [];
 
-    const header = this.parseCsvLine(rawLines[0]);
+    const delimiter = this.detectDelimiter(rawLines[0]);
+    const header = this.parseCsvLine(rawLines[0], delimiter);
+    const normalizedHeader = header.map(h => h.trim().toLowerCase());
 
-    const dateLocalIdx = header.indexOf('Data da solicitação (local)');
-    const timeLocalIdx = header.indexOf('Hora da solicitação (local)');
-    const dateUtcIdx = header.indexOf('Data da solicitação (UTC)');
-    const timeUtcIdx = header.indexOf('Hora da solicitação (UTC)');
-    const firstNameIdx = header.indexOf('Nome');
-    const lastNameIdx = header.indexOf('Sobrenome');
-    const emailIdx = header.indexOf('E-mail');
-    const serviceIdx = header.indexOf('Serviço');
-    const cityIdx = header.indexOf('Cidade');
-    const originIdx = header.indexOf('Endereço de partida');
-    const destIdx = header.indexOf('Endereço de destino');
-    const valueBrlIdx = header.indexOf('Valor da transação: BRL');
-    const totalBrlIdx = header.indexOf('Valor total: BRL');
-    const tripIdIdx = header.indexOf('ID da viagem/Uber Eats');
-    const distMiIdx = header.indexOf('Distância (mi)');
-    const durationIdx = header.indexOf('Duração (min)');
-    const costCenterIdx = header.indexOf('Código da despesa');
-    const groupIdx = header.indexOf('Grupo');
-    const guestFirstIdx = header.indexOf('Nome do convidado');
-    const guestLastIdx = header.indexOf('Sobrenome do convidado');
-    const multipleStopsIdx = header.indexOf('Várias paradas');
-    const stopInfoIdx = header.indexOf('Informações da parada');
+    const findCol = (...candidates: string[]) => {
+      for (const cand of candidates) {
+        const lower = cand.toLowerCase();
+        const idx = normalizedHeader.indexOf(lower);
+        if (idx >= 0) return idx;
+        const partialIdx = normalizedHeader.findIndex(h => h.includes(lower));
+        if (partialIdx >= 0) return partialIdx;
+      }
+      return -1;
+    };
+
+    const dateLocalIdx = findCol('data da solicitação (local)', 'data da solicitacao (local)', 'data (local)', 'data local');
+    const timeLocalIdx = findCol('hora da solicitação (local)', 'hora da solicitacao (local)', 'hora (local)', 'hora local');
+    const dateUtcIdx = findCol('data da solicitação (utc)', 'data da solicitacao (utc)', 'data (utc)');
+    const timeUtcIdx = findCol('hora da solicitação (utc)', 'hora da solicitacao (utc)', 'hora (utc)');
+    const firstNameIdx = findCol('nome');
+    const lastNameIdx = findCol('sobrenome');
+    const emailIdx = findCol('e-mail', 'email');
+    const serviceIdx = findCol('serviço', 'servico');
+    const cityIdx = findCol('cidade');
+    const originIdx = findCol('endereço de partida', 'endereco de partida', 'origem');
+    const destIdx = findCol('endereço de destino', 'endereco de destino', 'destino');
+    const valueBrlIdx = findCol('valor da transação: brl', 'valor da transacao: brl', 'valor: brl');
+    const totalBrlIdx = findCol('valor total: brl', 'valor total (brl)', 'valor total');
+    const tripIdIdx = findCol('id da viagem/uber eats', 'id da viagem', 'id viagem');
+    const distMiIdx = findCol('distância (mi)', 'distancia (mi)', 'distância', 'distancia');
+    const durationIdx = findCol('duração (min)', 'duracao (min)', 'duração', 'duracao');
+    const costCenterIdx = findCol('código da despesa', 'codigo da despesa', 'centro de custo');
+    const groupIdx = findCol('grupo');
+    const guestFirstIdx = findCol('nome do convidado', 'nome convidado');
+    const guestLastIdx = findCol('sobrenome do convidado', 'sobrenome convidado');
+    const multipleStopsIdx = findCol('várias paradas', 'varias paradas');
+    const stopInfoIdx = findCol('informações da parada', 'informacoes da parada', 'paradas');
 
     const records: UberCsvTripRecord[] = [];
 
     for (let i = 1; i < rawLines.length; i++) {
-      const cols = this.parseCsvLine(rawLines[i]);
-      if (cols.length < 10) continue;
+      const cols = this.parseCsvLine(rawLines[i], delimiter);
+      if (cols.length < 5) continue;
 
-      const rawVal = cols[totalBrlIdx >= 0 ? totalBrlIdx : valueBrlIdx] || cols[11] || '0';
-      const valueBrl = parseFloat(rawVal.replace(',', '.')) || 0;
+      let rawVal = cols[totalBrlIdx >= 0 ? totalBrlIdx : valueBrlIdx] || cols[11] || '0';
+      // Converte valores no formato 1.234,56 ou 64,96
+      if (rawVal.includes(',') && rawVal.includes('.')) {
+        rawVal = rawVal.replace(/\./g, '').replace(',', '.');
+      } else if (rawVal.includes(',')) {
+        rawVal = rawVal.replace(',', '.');
+      }
+      const valueBrl = parseFloat(rawVal) || 0;
       if (valueBrl <= 0) continue;
 
       const rawDateLocal = cols[dateLocalIdx >= 0 ? dateLocalIdx : 15] || cols[0];
