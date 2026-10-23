@@ -93,8 +93,13 @@ export default function App() {
     setLastSyncTime(cfg.lastSyncedAt);
   }, [selectedDate]);
 
-  // Initial load
+  // Initial load & real-time target synchronization
   useEffect(() => {
+    // Escuta alterações de meta em tempo real (SSE, BroadcastChannel, polling)
+    const unsubscribeTarget = SheetsService.subscribeTarget((newTarget) => {
+      setTargetConfig(newTarget);
+    });
+
     const init = async () => {
       await SheetsService.loadInitialData();
       const existingTrips = SheetsService.getTrips();
@@ -103,6 +108,10 @@ export default function App() {
       refreshData(latest);
     };
     init();
+
+    return () => {
+      unsubscribeTarget();
+    };
   }, []);
 
   const handlePeriodFilterChange = (filter: PeriodFilter, customRange?: { start: string; end: string }) => {

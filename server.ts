@@ -108,24 +108,86 @@ async function startServer() {
     });
   });
 
-  // GET /api/mobility/target - Retorna a meta de saving compartilhada por todos os usuários
+// SSE clients connected for live target synchronization across all users
+const sseTargetClients = new Set<express.Response>();
+
+function getLatestTargetConfig() {
+  try {
+    if (fs.existsSync(TARGET_FILE)) {
+      const raw = fs.readFileSync(TARGET_FILE, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.targetValue === 'number') {
+        currentTargetConfig = { ...currentTargetConfig, ...parsed };
+      }
+    }
+  } catch (err) {
+    console.warn('[Server] Could not read target-config.json:', err);
+  }
+  return currentTargetConfig;
+}
+
+function broadcastTargetUpdate(target: typeof currentTargetConfig) {
+  const data = `data: ${JSON.stringify(target)}\n\n`;
+  for (const client of sseTargetClients) {
+    try {
+      client.write(data);
+    } catch {
+      sseTargetClients.delete(client);
+    }
+  }
+}
+
+  // GET /api/mobility/target - Retorna a meta de saving compartilhada por todos os usuários (sem cache)
   app.get('/api/mobility/target', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.json({
       success: true,
-      target: currentTargetConfig
+      target: getLatestTargetConfig()
+    });
+  });
+
+  // GET /api/mobility/target/stream - Server-Sent Events (SSE) para sincronização instantânea entre todos os usuários
+  app.get('/api/mobility/target/stream', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.flushHeaders?.();
+
+    sseTargetClients.add(res);
+
+    // Envia o estado atual imediatamente na conexão
+    const current = getLatestTargetConfig();
+    res.write(`data: ${JSON.stringify(current)}\n\n`);
+
+    // Heartbeat a cada 25 segundos para manter a conexão aberta
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(': keepalive\n\n');
+      } catch {
+        clearInterval(heartbeat);
+      }
+    }, 25000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      sseTargetClients.delete(res);
     });
   });
 
   // POST /api/mobility/target - Atualiza a meta de saving globalmente para todos os usuários
   app.post('/api/mobility/target', (req, res) => {
     const { targetType, targetValue, month, updatedBy } = req.body;
-    if (typeof targetValue !== 'number' || isNaN(targetValue) || targetValue <= 0) {
+    let numVal = typeof targetValue === 'number' ? targetValue : parseFloat(String(targetValue).replace(',', '.'));
+    if (isNaN(numVal) || numVal <= 0) {
       return res.status(400).json({ error: 'targetValue deve ser um número positivo.' });
     }
 
     currentTargetConfig = {
       targetType: targetType === 'percent' ? 'percent' : 'value',
-      targetValue: Number(targetValue),
+      targetValue: Number(numVal),
       month: month || currentTargetConfig.month || '2026-10',
       updatedAt: new Date().toISOString(),
       updatedBy: updatedBy || 'Gestor de Mobilidade'
@@ -137,6 +199,9 @@ async function startServer() {
     } catch (err) {
       console.error('[Server] Erro ao gravar target-config.json:', err);
     }
+
+    // Transmite a nova meta instantaneamente a todos os navegadores conectados via SSE
+    broadcastTargetUpdate(currentTargetConfig);
 
     res.json({
       success: true,

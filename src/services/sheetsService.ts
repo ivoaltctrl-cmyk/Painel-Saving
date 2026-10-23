@@ -209,19 +209,141 @@ export class SheetsService {
   }
 
   // ==========================================
-  // Meta de Saving Mensal (Compartilhada Globalmente)
+  // Meta de Saving Mensal (Sincronizada Globalmente em Tempo Real)
   // ==========================================
+
+  private static targetListeners: Set<(target: SavingTargetConfig) => void> = new Set();
+  private static broadcastChannel: BroadcastChannel | null = null;
+  private static eventSource: EventSource | null = null;
+  private static targetSyncStarted = false;
+
+  public static subscribeTarget(listener: (target: SavingTargetConfig) => void): () => void {
+    this.targetListeners.add(listener);
+    // Dispara imediatamente com o valor atual em cache ou memória
+    listener(this.getSavingTarget());
+    this.startTargetSync();
+
+    return () => {
+      this.targetListeners.delete(listener);
+    };
+  }
+
+  private static notifyTargetListeners(target: SavingTargetConfig): void {
+    this.targetListeners.forEach(listener => {
+      try {
+        listener(target);
+      } catch (err) {
+        console.error('[SheetsService] Erro no listener de meta:', err);
+      }
+    });
+  }
+
+  public static startTargetSync(): void {
+    if (typeof window === 'undefined' || this.targetSyncStarted) return;
+    this.targetSyncStarted = true;
+
+    // 1. Canal entre abas do mesmo navegador (BroadcastChannel)
+    if ('BroadcastChannel' in window) {
+      try {
+        this.broadcastChannel = new BroadcastChannel('mobility_target_channel');
+        this.broadcastChannel.onmessage = (event) => {
+          if (event.data && typeof event.data.targetValue === 'number') {
+            this.savingTarget = { ...DEFAULT_SAVING_TARGET, ...event.data };
+            try {
+              localStorage.setItem(LOCAL_STORAGE_SAVING_TARGET, JSON.stringify(this.savingTarget));
+            } catch {}
+            this.notifyTargetListeners(this.savingTarget);
+          }
+        };
+      } catch (e) {
+        console.warn('[SheetsService] BroadcastChannel não disponível:', e);
+      }
+    }
+
+    // 2. Conexão Server-Sent Events (SSE) para atualização instantânea do servidor entre diferentes usuários
+    if ('EventSource' in window) {
+      try {
+        this.eventSource = new EventSource('/api/mobility/target/stream');
+        this.eventSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data && typeof data.targetValue === 'number') {
+              const hasChanged = 
+                this.savingTarget.targetValue !== data.targetValue ||
+                this.savingTarget.targetType !== data.targetType ||
+                this.savingTarget.updatedAt !== data.updatedAt;
+
+              if (hasChanged) {
+                this.savingTarget = { ...DEFAULT_SAVING_TARGET, ...data };
+                try {
+                  localStorage.setItem(LOCAL_STORAGE_SAVING_TARGET, JSON.stringify(this.savingTarget));
+                } catch {}
+                this.notifyTargetListeners(this.savingTarget);
+              }
+            }
+          } catch (e) {
+            // Ignora mensagens que não sejam JSON (ex: keepalive)
+          }
+        };
+
+        this.eventSource.onerror = () => {
+          // Em caso de desconexão, o EventSource reconecta automaticamente
+        };
+      } catch (e) {
+        console.warn('[SheetsService] EventSource falhou ao inicializar:', e);
+      }
+    }
+
+    // 3. Fallback de escuta do LocalStorage para abas que não suportam BroadcastChannel
+    window.addEventListener('storage', (e) => {
+      if (e.key === LOCAL_STORAGE_SAVING_TARGET && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed && typeof parsed.targetValue === 'number') {
+            this.savingTarget = { ...DEFAULT_SAVING_TARGET, ...parsed };
+            this.notifyTargetListeners(this.savingTarget);
+          }
+        } catch {}
+      }
+    });
+
+    // 4. Polling periódico de segurança (a cada 3 segundos) com anti-cache
+    setInterval(() => {
+      this.fetchSavingTarget();
+    }, 3000);
+
+    // 5. Atualização imediata ao ganhar foco na janela/aba
+    window.addEventListener('focus', () => {
+      this.fetchSavingTarget();
+    });
+
+    // Carrega a meta remota imediatamente
+    this.fetchSavingTarget();
+  }
 
   public static async fetchSavingTarget(): Promise<SavingTargetConfig> {
     try {
-      const res = await fetch('/api/mobility/target');
+      const res = await fetch(`/api/mobility/target?_t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+      });
       if (res.ok) {
         const data = await res.json();
-        if (data && data.success && data.target) {
-          this.savingTarget = { ...DEFAULT_SAVING_TARGET, ...data.target };
+        if (data && data.success && data.target && typeof data.target.targetValue === 'number') {
+          const remoteTarget: SavingTargetConfig = { ...DEFAULT_SAVING_TARGET, ...data.target };
+          const hasChanged = 
+            this.savingTarget.targetValue !== remoteTarget.targetValue ||
+            this.savingTarget.targetType !== remoteTarget.targetType ||
+            this.savingTarget.updatedAt !== remoteTarget.updatedAt;
+
+          this.savingTarget = remoteTarget;
           try {
             localStorage.setItem(LOCAL_STORAGE_SAVING_TARGET, JSON.stringify(this.savingTarget));
           } catch {}
+
+          if (hasChanged) {
+            this.notifyTargetListeners(this.savingTarget);
+          }
           return this.savingTarget;
         }
       }
@@ -232,11 +354,17 @@ export class SheetsService {
   }
 
   public static getSavingTarget(): SavingTargetConfig {
+    if (this.savingTarget && this.savingTarget.targetValue > 0) {
+      return this.savingTarget;
+    }
     try {
       const stored = localStorage.getItem(LOCAL_STORAGE_SAVING_TARGET);
       if (stored) {
-        this.savingTarget = { ...DEFAULT_SAVING_TARGET, ...JSON.parse(stored) };
-        return this.savingTarget;
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed.targetValue === 'number') {
+          this.savingTarget = { ...DEFAULT_SAVING_TARGET, ...parsed };
+          return this.savingTarget;
+        }
       }
     } catch {
       // fallback
@@ -245,24 +373,46 @@ export class SheetsService {
   }
 
   public static async setSavingTarget(target: SavingTargetConfig): Promise<SavingTargetConfig> {
-    this.savingTarget = target;
+    const cleanTarget: SavingTargetConfig = {
+      ...target,
+      targetValue: Number(target.targetValue),
+      updatedAt: new Date().toISOString(),
+      updatedBy: target.updatedBy || 'Gestor de Mobilidade'
+    };
+
+    this.savingTarget = cleanTarget;
     try {
-      localStorage.setItem(LOCAL_STORAGE_SAVING_TARGET, JSON.stringify(target));
+      localStorage.setItem(LOCAL_STORAGE_SAVING_TARGET, JSON.stringify(cleanTarget));
     } catch {
       // storage unavailable
     }
 
-    // Persiste globalmente no backend para todos os usuários
+    // Notifica listeners locais imediatamente para feedback instantâneo na UI
+    this.notifyTargetListeners(cleanTarget);
+
+    // Propaga via BroadcastChannel para outras abas no mesmo navegador
+    try {
+      this.broadcastChannel?.postMessage(cleanTarget);
+    } catch {}
+
+    // Persiste globalmente no backend para todos os outros usuários e navegadores
     try {
       const res = await fetch('/api/mobility/target', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(target)
+        body: JSON.stringify(cleanTarget)
       });
       if (res.ok) {
         const data = await res.json();
         if (data && data.success && data.target) {
           this.savingTarget = { ...this.savingTarget, ...data.target };
+          try {
+            localStorage.setItem(LOCAL_STORAGE_SAVING_TARGET, JSON.stringify(this.savingTarget));
+          } catch {}
+          this.notifyTargetListeners(this.savingTarget);
+          try {
+            this.broadcastChannel?.postMessage(this.savingTarget);
+          } catch {}
           return this.savingTarget;
         }
       }

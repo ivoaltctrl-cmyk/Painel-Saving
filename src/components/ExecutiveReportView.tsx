@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ExecutiveBoardComparison, 
   TaxiScenario, 
@@ -97,19 +97,66 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
     onDataRefresh();
   };
 
+  const [isSavingTarget, setIsSavingTarget] = useState(false);
+
+  // Mantém os campos do formulário sincronizados com as atualizações remotas de meta
+  useEffect(() => {
+    setTargetTypeInput(targetConfig.targetType);
+    setTargetValueInput(targetConfig.targetValue.toString());
+  }, [targetConfig]);
+
+  // Parser robusto para números no formato brasileiro (ex: 100.000 ou 100.000,00) e padrão (100000)
+  const parseUserTargetNumber = (input: string): number => {
+    const clean = input.trim();
+    if (!clean) return NaN;
+
+    // Se contiver ponto e vírgula: "100.000,00" ou "100,000.00"
+    if (clean.includes('.') && clean.includes(',')) {
+      if (clean.indexOf('.') < clean.indexOf(',')) {
+        // Brasileiro: 100.000,50 -> remove pontos, troca vírgula por ponto
+        return parseFloat(clean.replace(/\./g, '').replace(',', '.'));
+      } else {
+        // Americano: 100,000.50 -> remove vírgulas
+        return parseFloat(clean.replace(/,/g, ''));
+      }
+    }
+
+    // Se contiver apenas vírgula: "100000,50" ou "6000,00" ou "60,5"
+    if (clean.includes(',')) {
+      return parseFloat(clean.replace(',', '.'));
+    }
+
+    // Se contiver apenas ponto: pode ser milhar "100.000" / "6.000" ou decimal "15.5"
+    if (clean.includes('.')) {
+      const parts = clean.split('.');
+      // Se a última parte tiver exatamente 3 dígitos (ex: 100.000 ou 6.000 ou 1.500.000)
+      if (parts.length > 1 && parts.every((p, idx) => idx === 0 ? p.length >= 1 : p.length === 3)) {
+        return parseFloat(clean.replace(/\./g, ''));
+      }
+      return parseFloat(clean);
+    }
+
+    return parseFloat(clean);
+  };
+
   const handleSaveTarget = async (e: React.FormEvent) => {
     e.preventDefault();
-    const val = parseFloat(targetValueInput.replace(',', '.'));
+    const val = parseUserTargetNumber(targetValueInput);
     if (!isNaN(val) && val > 0) {
-      await SheetsService.setSavingTarget({
-        ...targetConfig,
-        targetType: targetTypeInput,
-        targetValue: val,
-        month: targetConfig.month || '2026-10',
-        updatedBy: 'Gestor de Mobilidade'
-      });
-      setIsEditingTarget(false);
-      onDataRefresh();
+      setIsSavingTarget(true);
+      try {
+        await SheetsService.setSavingTarget({
+          ...targetConfig,
+          targetType: targetTypeInput,
+          targetValue: val,
+          month: targetConfig.month || '2026-10',
+          updatedBy: 'Gestor de Mobilidade'
+        });
+        setIsEditingTarget(false);
+        onDataRefresh();
+      } finally {
+        setIsSavingTarget(false);
+      }
     }
   };
 
@@ -381,13 +428,19 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
               Meta de Saving Mensal
             </h3>
-            <span className="text-[11px] bg-blue-50 text-blue-700 font-medium px-2 py-0.5 rounded border border-blue-200">
-              Sincronizada para todos os usuários
+            <span className="text-[11px] bg-emerald-50 text-emerald-700 font-medium px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
+              <span>Sincronizada em tempo real para todos os usuários</span>
             </span>
+            {targetConfig.updatedAt && (
+              <span className="text-[10px] text-slate-400">
+                (Última alteração: {new Date(targetConfig.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}{targetConfig.updatedBy ? ` por ${targetConfig.updatedBy}` : ''})
+              </span>
+            )}
           </div>
           <button
             onClick={() => setIsEditingTarget(!isEditingTarget)}
-            className="text-xs text-slate-600 hover:text-slate-900 underline font-semibold"
+            className="text-xs text-slate-600 hover:text-slate-900 underline font-semibold cursor-pointer"
           >
             {isEditingTarget ? 'Fechar Edição' : 'Ajustar Meta'}
           </button>
@@ -404,18 +457,24 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
               <option value="value">Valor Financeiro (R$)</option>
               <option value="percent">Percentual de Redução (%)</option>
             </select>
-            <input
-              type="text"
-              value={targetValueInput}
-              onChange={(e) => setTargetValueInput(e.target.value)}
-              placeholder="Ex: 6000 ou 60"
-              className="w-24 px-2 py-1 border border-slate-300 rounded bg-white font-mono font-bold"
-            />
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                value={targetValueInput}
+                onChange={(e) => setTargetValueInput(e.target.value)}
+                placeholder={targetTypeInput === 'value' ? 'Ex: 100000 ou 100.000' : 'Ex: 60 ou 60%'}
+                className="w-32 px-2 py-1 border border-slate-300 rounded bg-white font-mono font-bold"
+              />
+              <span className="text-slate-400 text-[11px]">
+                {targetTypeInput === 'value' ? 'R$' : '%'}
+              </span>
+            </div>
             <button
               type="submit"
-              className="px-3 py-1 bg-slate-900 text-white rounded font-bold"
+              disabled={isSavingTarget}
+              className="px-3 py-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white rounded font-bold cursor-pointer transition-colors"
             >
-              Salvar Meta
+              {isSavingTarget ? 'Salvando e Sincronizando...' : 'Salvar para Todos'}
             </button>
           </form>
         )}
