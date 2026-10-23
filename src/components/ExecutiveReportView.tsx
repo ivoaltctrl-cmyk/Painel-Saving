@@ -97,14 +97,16 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
     onDataRefresh();
   };
 
-  const handleSaveTarget = (e: React.FormEvent) => {
+  const handleSaveTarget = async (e: React.FormEvent) => {
     e.preventDefault();
     const val = parseFloat(targetValueInput.replace(',', '.'));
     if (!isNaN(val) && val > 0) {
-      SheetsService.setSavingTarget({
+      await SheetsService.setSavingTarget({
         ...targetConfig,
         targetType: targetTypeInput,
         targetValue: val,
+        month: targetConfig.month || '2026-10',
+        updatedBy: 'Gestor de Mobilidade'
       });
       setIsEditingTarget(false);
       onDataRefresh();
@@ -316,6 +318,16 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
               </select>
             </div>
 
+            {/* Tariff & Audit Button */}
+            <button
+              onClick={onOpenTariffModal}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors shadow-2xs"
+              title="Gerenciar tabela de vigências contratuais e histórico de auditoria"
+            >
+              <Settings2 className="w-3.5 h-3.5 text-slate-500" />
+              <span>Tarifa Táxi ({formatBRL(accumulatedComparison.taxiReferenceRate)})</span>
+            </button>
+
             {/* Print / PDF Button */}
             <button
               onClick={handlePrint}
@@ -359,103 +371,23 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
             </button>
           </div>
         )}
-
-        {/* Sub-bar: Tariff Management & Conservative Scenario Controls */}
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between pt-3 text-xs gap-3">
-          {/* Tariff Period & Button to Open Modal */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-slate-600 font-medium">Tarifa Contratual Vigente:</span>
-            <strong className="font-mono tabular-nums text-slate-900 font-bold bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-              {formatBRL(accumulatedComparison.taxiReferenceRate)}
-            </strong>
-            <button
-              onClick={onOpenTariffModal}
-              className="flex items-center gap-1 px-2 py-0.5 text-xs text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded transition-colors font-medium border border-slate-300"
-              title="Gerenciar tabela de vigências contratuais e histórico de auditoria"
-            >
-              <Settings2 className="w-3.5 h-3.5 text-slate-600" />
-              <span>Gerenciar Vigências & Auditoria</span>
-            </button>
-          </div>
-
-          {/* Conservative Taxi Scenario Selector */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-slate-600 font-medium">Cenário do Táxi:</span>
-            <div className="inline-flex rounded-md shadow-2xs border border-slate-300 overflow-hidden bg-white">
-              {([
-                { val: 1.0, label: '100% (Contratual)' },
-                { val: 0.8, label: '80%' },
-                { val: 0.7, label: '70%' },
-                { val: 0.5, label: '50%' }
-              ] as const).map(sc => (
-                <button
-                  key={sc.val}
-                  type="button"
-                  onClick={() => handleScenarioChange(sc.val)}
-                  className={`px-2.5 py-1 text-xs font-semibold transition-colors ${
-                    selectedScenario === sc.val
-                      ? 'bg-slate-900 text-white'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  {sc.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Metadata info strip: Period and Last Sync */}
-        <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <Calendar className="w-3.5 h-3.5 text-slate-400" />
-            <span>Período analisado: <strong>{periodFilterLabel}</strong></span>
-            <span aria-hidden="true">·</span>
-            <Clock className="w-3.5 h-3.5 text-slate-400 ml-1" />
-            <span>Última atualização: <strong>{lastSyncTime}</strong></span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-block w-2 h-2 rounded-full bg-slate-900"></span>
-            <span>Custo Realizado (Uber Faturado)</span>
-            <span className="inline-block w-2 h-2 rounded-full bg-slate-300 ml-2"></span>
-            <span>Custo Estimado (Táxi de Referência Contratual)</span>
-          </div>
-        </div>
       </div>
 
-      {/* 2. Mandatory Fixed Line: Saving no Cenário Conservador */}
-      <div className="p-4 bg-emerald-50/80 border border-emerald-300 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs shadow-2xs">
-        <div className="flex items-center gap-2.5">
-          <ShieldAlert className="w-4 h-4 text-emerald-700 shrink-0" />
-          <div>
-            <span className="font-bold text-emerald-950 text-sm">
-              Saving no cenário {selectedScenario === 1.0 ? 'contratual pleno' : 'conservador'} ({currentScenarioPercentLabel}):{' '}
-            </span>
-            <span className="font-mono tabular-nums font-extrabold text-emerald-700 text-base">
-              {formatBRL(conservativeSaving)}
-            </span>
-            <span className="text-emerald-800 ml-1">
-              ({formatPercent(accumulatedComparison.uber.costReductionPercent)} de redução)
-            </span>
-          </div>
-        </div>
-        <div className="text-[11px] text-emerald-800 font-medium">
-          Tarifa de táxi considerada: <strong className="font-mono tabular-nums">{formatBRL(accumulatedComparison.taxiReferenceRate * selectedScenario)}</strong> / atendimento
-        </div>
-      </div>
-
-      {/* 3. Monthly Saving Target Card with Progress Bar & Projection */}
+      {/* 2. Monthly Saving Target Card with Progress Bar & Projection (Shared globally across all users) */}
       <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-xs">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-3 border-b border-slate-100 gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Target className="w-4 h-4 text-emerald-600" />
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-              Meta de Saving Mensal (Outubro/2026)
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+              Meta de Saving Mensal
             </h3>
+            <span className="text-[11px] bg-blue-50 text-blue-700 font-medium px-2 py-0.5 rounded border border-blue-200">
+              Sincronizada para todos os usuários
+            </span>
           </div>
           <button
             onClick={() => setIsEditingTarget(!isEditingTarget)}
-            className="text-xs text-slate-500 hover:text-slate-800 underline font-medium"
+            className="text-xs text-slate-600 hover:text-slate-900 underline font-semibold"
           >
             {isEditingTarget ? 'Fechar Edição' : 'Ajustar Meta'}
           </button>

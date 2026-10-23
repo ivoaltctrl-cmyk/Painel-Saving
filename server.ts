@@ -2,9 +2,46 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Persistence directory and file for shared settings
+const DATA_DIR = path.resolve(__dirname, 'data');
+const TARGET_FILE = path.resolve(DATA_DIR, 'target-config.json');
+
+// Ensure data directory exists
+if (!fs.existsSync(DATA_DIR)) {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  } catch (err) {
+    console.warn('[Server] Could not create data directory:', err);
+  }
+}
+
+// Default target
+let currentTargetConfig = {
+  targetType: 'value' as 'value' | 'percent',
+  targetValue: 6000,
+  month: '2026-10',
+  updatedAt: new Date().toISOString(),
+  updatedBy: 'Sistema'
+};
+
+// Load persisted target config if exists
+try {
+  if (fs.existsSync(TARGET_FILE)) {
+    const raw = fs.readFileSync(TARGET_FILE, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.targetValue === 'number') {
+      currentTargetConfig = { ...currentTargetConfig, ...parsed };
+      console.log('[Server] Loaded persisted shared target:', currentTargetConfig);
+    }
+  }
+} catch (err) {
+  console.warn('[Server] Could not read target-config.json:', err);
+}
 
 // In-memory store for server-side API integration
 let tripsData = [
@@ -68,6 +105,42 @@ async function startServer() {
       version: '1.4.0',
       connectedProviders: ['Uber for Business / Central', 'Google Sheets Integration', 'Cooperativas de Táxi GRU'],
       timestamp: new Date().toISOString()
+    });
+  });
+
+  // GET /api/mobility/target - Retorna a meta de saving compartilhada por todos os usuários
+  app.get('/api/mobility/target', (_req, res) => {
+    res.json({
+      success: true,
+      target: currentTargetConfig
+    });
+  });
+
+  // POST /api/mobility/target - Atualiza a meta de saving globalmente para todos os usuários
+  app.post('/api/mobility/target', (req, res) => {
+    const { targetType, targetValue, month, updatedBy } = req.body;
+    if (typeof targetValue !== 'number' || isNaN(targetValue) || targetValue <= 0) {
+      return res.status(400).json({ error: 'targetValue deve ser um número positivo.' });
+    }
+
+    currentTargetConfig = {
+      targetType: targetType === 'percent' ? 'percent' : 'value',
+      targetValue: Number(targetValue),
+      month: month || currentTargetConfig.month || '2026-10',
+      updatedAt: new Date().toISOString(),
+      updatedBy: updatedBy || 'Gestor de Mobilidade'
+    };
+
+    try {
+      fs.writeFileSync(TARGET_FILE, JSON.stringify(currentTargetConfig, null, 2), 'utf-8');
+      console.log('[Server] Meta global de saving atualizada e salva em disco:', currentTargetConfig);
+    } catch (err) {
+      console.error('[Server] Erro ao gravar target-config.json:', err);
+    }
+
+    res.json({
+      success: true,
+      target: currentTargetConfig
     });
   });
 

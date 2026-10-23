@@ -33,13 +33,13 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
   const totalPassengers = dailyRecords.reduce((acc, r) => acc + r.passengerCount, 0);
 
   const maxDailyTaxi = Math.max(...dailyRecords.map(r => r.taxiSpend), 5000);
-  const maxCumulative = Math.max(...dailyRecords.map(r => r.cumulativeSaving), 6000);
+  const maxCumulative = Math.max(...dailyRecords.map(r => r.cumulativeSaving), 6000) * 1.14;
 
   const svgWidth = 780;
-  const svgHeight = 290;
+  const svgHeight = 310;
   const paddingLeft = 85;
-  const paddingRight = 75;
-  const paddingTop = 35;
+  const paddingRight = 85;
+  const paddingTop = 45;
   const paddingBottom = 45;
   const chartWidth = svgWidth - paddingLeft - paddingRight;
   const chartHeight = svgHeight - paddingTop - paddingBottom;
@@ -97,9 +97,9 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
               <span>Saving do Dia</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-3.5 h-0.5 bg-emerald-700 inline-block border-b-2 border-emerald-600"></span>
-              <span className="w-2 h-2 rounded-full bg-emerald-700 inline-block -ml-1"></span>
-              <span>Linha Acumulada</span>
+              <span className="w-3.5 h-1 bg-blue-600 inline-block rounded-xs"></span>
+              <span className="w-2.5 h-2.5 rounded-full bg-blue-600 border border-white inline-block -ml-1.5"></span>
+              <span className="font-semibold text-blue-700">Linha Acumulada</span>
             </div>
           </div>
         </div>
@@ -136,8 +136,14 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
         <div className="relative w-full overflow-x-auto pt-2">
           <svg
             viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-            className="w-full h-72 select-none"
+            className="w-full h-80 select-none"
           >
+            <defs>
+              <filter id="chartBadgeShadow" x="-15%" y="-25%" width="130%" height="160%">
+                <feDropShadow dx="0" dy="1.5" stdDeviation="1.5" floodColor="#0F172A" floodOpacity="0.12" />
+              </filter>
+            </defs>
+
             {/* Horizontal Grid lines with Brazilian currency formatting */}
             {[0, 0.25, 0.5, 0.75, 1].map((pct, idx) => {
               const y = paddingTop + chartHeight * (1 - pct);
@@ -164,13 +170,13 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
                   >
                     {formatBRL(value)}
                   </text>
-                  {/* Right Y Axis (Cumulative BRL) */}
+                  {/* Right Y Axis (Cumulative BRL - Distinct Royal Blue) */}
                   <text
                     x={svgWidth - paddingRight + 8}
                     y={y + 4}
                     textAnchor="start"
                     fontSize="10"
-                    fill="#059669"
+                    fill="#2563EB"
                     className="font-mono tabular-nums font-semibold"
                   >
                     {formatBRL(cumValue)}
@@ -206,9 +212,9 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
                   {/* Background selection highlight */}
                   <rect
                     x={groupX + 4}
-                    y={paddingTop - 5}
+                    y={paddingTop - 10}
                     width={barGroupWidth - 8}
-                    height={chartHeight + 10}
+                    height={chartHeight + 18}
                     fill={isSelected ? '#F1F5F9' : isHovered ? '#F8FAFC' : 'transparent'}
                     stroke={isSelected ? '#CBD5E1' : 'transparent'}
                     rx="6"
@@ -223,7 +229,7 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
                     rx="4"
                     fill="#CBD5E1"
                   />
-                  {/* Persistent value label above taxi bar */}
+                  {/* Clean value label above taxi bar */}
                   <text
                     x={bar1X + barWidth / 2}
                     y={taxiY - 6}
@@ -250,21 +256,33 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
                     x={bar2X}
                     y={taxiY}
                     width={barWidth}
-                    height={Math.max(2, savingH)}
+                    height={Math.max(4, savingH)}
                     rx="4"
                     fill="#059669"
                   />
-                  {/* Persistent saving % label above uber bar */}
+                  {/* High-contrast Saving % label INSIDE the green bar (avoids overlap with line above) */}
                   <text
                     x={bar2X + barWidth / 2}
-                    y={taxiY - 6}
+                    y={taxiY + Math.min(Math.max(13, savingH / 2), 20)}
                     textAnchor="middle"
                     fontSize="10"
-                    fill="#059669"
-                    className="font-mono tabular-nums font-extrabold"
+                    fill="#FFFFFF"
+                    className="font-mono tabular-nums font-extrabold select-none pointer-events-none"
                   >
                     +{formatPercent(r.savingPercent)}
                   </text>
+                  {savingH >= 34 && (
+                    <text
+                      x={bar2X + barWidth / 2}
+                      y={taxiY + Math.min(Math.max(25, savingH / 2 + 12), 34)}
+                      textAnchor="middle"
+                      fontSize="9"
+                      fill="#DCFCE7"
+                      className="font-mono tabular-nums font-semibold select-none pointer-events-none"
+                    >
+                      {formatBRL(r.saving)}
+                    </text>
+                  )}
 
                   {/* X Axis Label */}
                   <text
@@ -282,40 +300,70 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
               );
             })}
 
-            {/* Cumulative Saving Line */}
+            {/* Cumulative Saving Line (Royal Blue #2563EB - completely eliminates green-on-green collision) */}
             {cumulativePoints.length > 1 && (
               <polyline
                 fill="none"
-                stroke="#047857"
-                strokeWidth="2.5"
-                strokeDasharray="4 2"
+                stroke="#2563EB"
+                strokeWidth="2.8"
+                strokeDasharray="5 3"
                 points={cumulativePolyline}
               />
             )}
 
-            {/* Cumulative Nodes */}
-            {cumulativePoints.map((pt, idx) => (
-              <g key={`cum-${idx}`}>
-                <circle
-                  cx={pt.x}
-                  cy={pt.y}
-                  r="4.5"
-                  fill="#047857"
-                  stroke="#FFFFFF"
-                  strokeWidth="2"
-                />
-                <text
-                  x={pt.x}
-                  y={pt.y - 8}
-                  textAnchor="middle"
-                  fontSize="10"
-                  fill="#047857"
-                  className="font-mono tabular-nums font-bold"
-                >
-                  Acum: {formatBRL(pt.val)}
-                </text>
-              </g>
-            ))}
+            {/* Cumulative Nodes & Non-colliding Pill Badges */}
+            {cumulativePoints.map((pt, idx) => {
+              const pillWidth = 104;
+              const pillHeight = 20;
+              const pillX = pt.x - pillWidth / 2;
+              const pillY = Math.max(6, pt.y - 28);
+
+              return (
+                <g key={`cum-${idx}`} className="pointer-events-none">
+                  {/* Subtle vertical connector between node and badge */}
+                  <line
+                    x1={pt.x}
+                    y1={pt.y}
+                    x2={pt.x}
+                    y2={pillY + pillHeight}
+                    stroke="#93C5FD"
+                    strokeWidth="1"
+                    strokeDasharray="2 2"
+                  />
+                  {/* Line Marker Node */}
+                  <circle
+                    cx={pt.x}
+                    cy={pt.y}
+                    r="4.5"
+                    fill="#2563EB"
+                    stroke="#FFFFFF"
+                    strokeWidth="2"
+                  />
+                  {/* High-contrast Pill Badge */}
+                  <rect
+                    x={pillX}
+                    y={pillY}
+                    width={pillWidth}
+                    height={pillHeight}
+                    rx="4"
+                    fill="#FFFFFF"
+                    stroke="#2563EB"
+                    strokeWidth="1.2"
+                    filter="url(#chartBadgeShadow)"
+                  />
+                  <text
+                    x={pt.x}
+                    y={pillY + 14}
+                    textAnchor="middle"
+                    fontSize="10"
+                    fill="#1D4ED8"
+                    className="font-mono tabular-nums font-bold"
+                  >
+                    Acum: {formatBRL(pt.val)}
+                  </text>
+                </g>
+              );
+            })}
           </svg>
         </div>
 

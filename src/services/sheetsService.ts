@@ -209,8 +209,27 @@ export class SheetsService {
   }
 
   // ==========================================
-  // Meta de Saving Mensal
+  // Meta de Saving Mensal (Compartilhada Globalmente)
   // ==========================================
+
+  public static async fetchSavingTarget(): Promise<SavingTargetConfig> {
+    try {
+      const res = await fetch('/api/mobility/target');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success && data.target) {
+          this.savingTarget = { ...DEFAULT_SAVING_TARGET, ...data.target };
+          try {
+            localStorage.setItem(LOCAL_STORAGE_SAVING_TARGET, JSON.stringify(this.savingTarget));
+          } catch {}
+          return this.savingTarget;
+        }
+      }
+    } catch (e) {
+      console.warn('[SheetsService] Falha ao carregar meta remota, usando cache local:', e);
+    }
+    return this.getSavingTarget();
+  }
 
   public static getSavingTarget(): SavingTargetConfig {
     try {
@@ -225,13 +244,33 @@ export class SheetsService {
     return this.savingTarget;
   }
 
-  public static setSavingTarget(target: SavingTargetConfig): void {
+  public static async setSavingTarget(target: SavingTargetConfig): Promise<SavingTargetConfig> {
     this.savingTarget = target;
     try {
       localStorage.setItem(LOCAL_STORAGE_SAVING_TARGET, JSON.stringify(target));
     } catch {
       // storage unavailable
     }
+
+    // Persiste globalmente no backend para todos os usuários
+    try {
+      const res = await fetch('/api/mobility/target', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(target)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success && data.target) {
+          this.savingTarget = { ...this.savingTarget, ...data.target };
+          return this.savingTarget;
+        }
+      }
+    } catch (err) {
+      console.error('[SheetsService] Erro ao sincronizar meta com backend:', err);
+    }
+
+    return this.savingTarget;
   }
 
   // ==========================================
@@ -351,6 +390,9 @@ export class SheetsService {
   }
 
   public static async loadInitialData(): Promise<UberCsvTripRecord[]> {
+    // Sincroniza a meta compartilhada com todos os usuários a partir do backend
+    await this.fetchSavingTarget();
+
     const existing = this.getTrips();
     const hasDay23 = existing.some(t => t.requestDateLocal === '2026-10-23');
     if (existing.length >= 80 && hasDay23) {

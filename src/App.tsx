@@ -195,7 +195,7 @@ export default function App() {
             <span>Dias na base: <strong>{availableDates.map(d => d.split('-').reverse().slice(0, 2).join('/')).join(', ')}</strong></span>
             <span aria-hidden="true" className="text-slate-300">·</span>
             <span className="font-mono tabular-nums text-[11px] text-slate-600">
-              Ref. Táxi: {formatBRL(effectiveTaxiRate)}/pedido ({Math.round(activeScenario * 100)}% contratual)
+              Ref. Táxi Contratual: <strong>{formatBRL(taxiReferenceRate)}</strong>/pedido
             </span>
           </div>
         </div>
