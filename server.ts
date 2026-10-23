@@ -71,15 +71,82 @@ async function startServer() {
     });
   });
 
-  // POST /api/mobility/sheets-sync - Proxy para download direto do CSV do Google Sheets
+  // POST /api/mobility/sheets-sync - Proxy inteligente para download direto do CSV do Google Sheets
   app.post('/api/mobility/sheets-sync', async (req, res) => {
-    const { url } = req.body;
-    if (!url) {
-      return res.status(400).json({ error: 'URL do Google Sheets é obrigatória' });
+    let { url } = req.body;
+    if (!url || typeof url !== 'string' || !url.trim()) {
+      url = 'https://docs.google.com/spreadsheets/d/1F2MPp5fuor41sKCJIgq7D3sbu9AL1dWBBusNX4XZcGE/edit';
     }
 
     try {
-      const response = await fetch(url, {
+      const trimmed = url.trim();
+      const match = trimmed.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+      const sheetId = match ? match[1] : null;
+      const gidMatch = trimmed.match(/[#&?]gid=([0-9]+)/);
+      const requestedGid = gidMatch ? gidMatch[1] : null;
+
+      if (sheetId) {
+        // Tenta primeiro o gid requisitado ou 0
+        const initialGid = requestedGid !== null ? requestedGid : '0';
+        const targetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${initialGid}`;
+        
+        const response = await fetch(targetUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        });
+
+        if (response.ok) {
+          const csv = await response.text();
+          const hasTripHeaders = /data da solicita|valor da transa|id da viagem|uber|preço|preco/i.test(csv);
+
+          if (hasTripHeaders) {
+            return res.json({ 
+              success: true, 
+              csv, 
+              detectedTab: initialGid === '0' ? 'Dados Uber' : `Aba gid=${initialGid}`,
+              sheetId 
+            });
+          }
+
+          // Se a aba requisitada NÃO tiver corridas detalhadas (ex.: usuário copiou URL na aba Dados Taxi Moover gid=1976358613),
+          // tenta automaticamente a aba principal gid=0 (onde fica a base Dados Uber)
+          if (initialGid !== '0') {
+            const fallbackUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
+            const fbResponse = await fetch(fallbackUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+              }
+            });
+
+            if (fbResponse.ok) {
+              const fbCsv = await fbResponse.text();
+              const fbHasTripHeaders = /data da solicita|valor da transa|id da viagem|uber|preço|preco/i.test(fbCsv);
+              if (fbHasTripHeaders) {
+                return res.json({ 
+                  success: true, 
+                  csv: fbCsv, 
+                  detectedTab: 'Dados Uber',
+                  autoSwitched: true,
+                  note: 'Aba de corridas (Dados Uber) localizada e sincronizada com sucesso.',
+                  sheetId 
+                });
+              }
+            }
+          }
+
+          // Se ainda não encontrou cabeçalho detalhado, retorna o CSV original (pode ser processado como resumo diário)
+          return res.json({ 
+            success: true, 
+            csv, 
+            detectedTab: initialGid === '1976358613' ? 'Dados Taxi Moover' : `Aba gid=${initialGid}`,
+            sheetId 
+          });
+        }
+      }
+
+      // Fallback para URL pública direta
+      const response = await fetch(trimmed, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }

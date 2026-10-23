@@ -120,7 +120,8 @@ export default function App() {
         if (res.success) {
           const latest = res.latestDate || (res.dates && res.dates[res.dates.length - 1]);
           refreshData(latest);
-          setGlobalNotice(`Planilha sincronizada online com sucesso! ${res.count} atendimentos processados.`);
+          const tabNotice = res.detectedTab ? ` (${res.detectedTab})` : '';
+          setGlobalNotice(`Planilha sincronizada online com sucesso! ${res.count} atendimentos processados${tabNotice}.`);
           setTimeout(() => setGlobalNotice(null), 4000);
           return;
         }

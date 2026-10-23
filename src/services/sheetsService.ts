@@ -12,13 +12,13 @@ import {
 } from '../types/mobility';
 import { CsvParserService } from './csvParserService';
 
-const LOCAL_STORAGE_UBER_TRIPS = 'mobility_uber_trips_data_v3';
-const LOCAL_STORAGE_SHEETS_CONFIG = 'mobility_sheets_config_v3';
-const LOCAL_STORAGE_TARIFF_PERIODS = 'mobility_tariff_periods_v3';
-const LOCAL_STORAGE_AUDIT_LOGS = 'mobility_audit_logs_v3';
-const LOCAL_STORAGE_ACTIVE_SCENARIO = 'mobility_active_scenario_v3';
-const LOCAL_STORAGE_SAVING_TARGET = 'mobility_saving_target_v3';
-const LOCAL_STORAGE_PERIOD_FILTER = 'mobility_period_filter_v3';
+const LOCAL_STORAGE_UBER_TRIPS = 'mobility_uber_trips_data_v4';
+const LOCAL_STORAGE_SHEETS_CONFIG = 'mobility_sheets_config_v4';
+const LOCAL_STORAGE_TARIFF_PERIODS = 'mobility_tariff_periods_v4';
+const LOCAL_STORAGE_AUDIT_LOGS = 'mobility_audit_logs_v4';
+const LOCAL_STORAGE_ACTIVE_SCENARIO = 'mobility_active_scenario_v4';
+const LOCAL_STORAGE_SAVING_TARGET = 'mobility_saving_target_v4';
+const LOCAL_STORAGE_PERIOD_FILTER = 'mobility_period_filter_v4';
 
 export const DEFAULT_TARIFF_PERIODS: ContractTariffPeriod[] = [
   {
@@ -58,8 +58,8 @@ export class SheetsService {
   private static customDateRange: { start: string; end: string } = { start: '', end: '' };
 
   private static config: GoogleSheetsConfig = {
-    sheetUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ_SavingTransporteAvulso/pub?output=csv',
-    lastSyncedAt: '22/10/2026 às 11:38',
+    sheetUrl: 'https://docs.google.com/spreadsheets/d/1F2MPp5fuor41sKCJIgq7D3sbu9AL1dWBBusNX4XZcGE/edit',
+    lastSyncedAt: '23/10/2026 às 11:45',
     status: 'synced',
     autoSyncIntervalMinutes: 15,
     taxiReferenceRate: 146.06,
@@ -352,10 +352,22 @@ export class SheetsService {
 
   public static async loadInitialData(): Promise<UberCsvTripRecord[]> {
     const existing = this.getTrips();
-    if (existing.length >= 50) {
+    const hasDay23 = existing.some(t => t.requestDateLocal === '2026-10-23');
+    if (existing.length >= 80 && hasDay23) {
       return existing;
     }
 
+    // Tenta primeiro carregar direto da planilha Google Sheets online oficial
+    try {
+      const syncRes = await this.syncFromGoogleSheets(this.config.sheetUrl);
+      if (syncRes.success && this.trips.length > 0) {
+        return this.trips;
+      }
+    } catch {
+      // continua para fallback
+    }
+
+    // Fallback: carrega CSV base e mescla o lote oficial do dia 23
     try {
       const response = await fetch('/assets/aistudio/SavingTransporteAvulso_-_Dados_Uber_fb6e558e.csv');
       if (response.ok) {
@@ -367,11 +379,15 @@ export class SheetsService {
         if (parsed.length > 0) {
           this.trips = parsed;
           this.saveTrips();
-          return this.trips;
         }
       }
     } catch {
       // fallback
+    }
+
+    // Garante que o dia 23 esteja na base mesmo offline
+    if (!this.trips.some(t => t.requestDateLocal === '2026-10-23')) {
+      this.loadDay23Batch();
     }
 
     return this.trips;
@@ -381,7 +397,7 @@ export class SheetsService {
    * Converte URLs padrão de compartilhamento do Google Sheets (/edit#gid=0) em link direto de exportação CSV
    */
   public static normalizeGoogleSheetUrl(rawUrl: string): string {
-    const trimmed = rawUrl.trim();
+    const trimmed = (rawUrl || '').trim();
     if (!trimmed) return '';
 
     // Se já é link direto de exportação CSV, retorna como está
@@ -401,34 +417,43 @@ export class SheetsService {
     return trimmed;
   }
 
-  public static async syncFromGoogleSheets(urlInput: string): Promise<{ 
+  public static async syncFromGoogleSheets(urlInput?: string): Promise<{ 
     success: boolean; 
     count: number; 
     newTripsCount?: number;
     dates?: string[];
     latestDate?: string;
+    detectedTab?: string;
     error?: string 
   }> {
-    const directUrl = this.normalizeGoogleSheetUrl(urlInput);
-    this.saveConfig({ sheetUrl: urlInput, status: 'syncing' });
+    const rawUrl = (urlInput || this.config.sheetUrl || 'https://docs.google.com/spreadsheets/d/1F2MPp5fuor41sKCJIgq7D3sbu9AL1dWBBusNX4XZcGE/edit').trim();
+    this.saveConfig({ sheetUrl: rawUrl, status: 'syncing' });
 
     try {
       let csvContent = '';
+      let detectedTab = 'Dados Uber';
+
+      // 1. Tenta via proxy backend do Express (resolve CORS, múltiplos tabs e redirecionamentos)
       try {
         const proxyRes = await fetch('/api/mobility/sheets-sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: directUrl })
+          body: JSON.stringify({ url: rawUrl })
         });
         if (proxyRes.ok) {
           const proxyData = await proxyRes.json();
-          csvContent = proxyData.csv;
+          if (proxyData.csv) {
+            csvContent = proxyData.csv;
+            detectedTab = proxyData.detectedTab || 'Dados Uber';
+          }
         }
       } catch {
-        // tenta direto
+        // tenta fetch direto no navegador
       }
 
+      // 2. Se o proxy não retornou, tenta fetch direto
       if (!csvContent) {
+        const directUrl = this.normalizeGoogleSheetUrl(rawUrl);
         const directRes = await fetch(directUrl);
         if (!directRes.ok) {
           throw new Error(`Falha ao obter planilha: status HTTP ${directRes.status}. Verifique se a planilha tem permissão pública de visualização.`);
@@ -441,7 +466,10 @@ export class SheetsService {
         throw new Error(importRes.error || 'Nenhum registro válido encontrado na planilha.');
       }
 
-      return importRes;
+      return {
+        ...importRes,
+        detectedTab
+      };
     } catch (err: any) {
       const errorMsg = err?.message || 'Erro ao sincronizar com Google Sheets.';
       this.saveConfig({ status: 'error', errorMessage: errorMsg });

@@ -232,6 +232,30 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Cabeçalho Oficial WFS para Impressão / Exportação PDF */}
+      <div className="hidden print:flex items-center justify-between pb-4 mb-2 border-b-2 border-slate-900">
+        <div className="flex items-center gap-3">
+          <img
+            src="/assets/aistudio/wfs-logo.svg_fbe187c8.png"
+            alt="WFS - A SATS Company"
+            className="h-11 sm:h-12 w-auto object-contain"
+          />
+          <div className="h-9 w-px bg-slate-300 mx-1" aria-hidden="true" />
+          <div>
+            <h1 className="text-base font-bold text-slate-900">
+              MobilitySaving · Operação Aeroporto Guarulhos (GRU)
+            </h1>
+            <p className="text-[11px] text-slate-600">
+              Relatório Executivo de Saving — Uber Central vs Custo Estimado de Táxi Avulso
+            </p>
+          </div>
+        </div>
+        <div className="text-right text-[11px] text-slate-600 font-mono">
+          <div>Emissão: {new Date().toLocaleDateString('pt-BR')}</div>
+          <div>Cenário Contratual: {currentScenarioPercentLabel}</div>
+        </div>
+      </div>
+
       {/* 1. Global Toolbar: Period Filter, Scenario Selector & Audit Trigger */}
       <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-xs">
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between pb-4 border-b border-slate-100 gap-4">
