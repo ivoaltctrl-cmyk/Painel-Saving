@@ -35,7 +35,7 @@ export interface TariffAuditLog {
 
 export interface SavingTargetConfig {
   targetType: 'value' | 'percent'; // R$ ou %
-  targetValue: number; // ex: 6000 (R$) ou 60 (%)
+  targetValue: number; // ex: 100000 (R$) ou 60 (%)
   month: string; // ex: "2026-10"
   updatedAt?: string;
   updatedBy?: string;
