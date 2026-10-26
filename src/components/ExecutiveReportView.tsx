@@ -24,7 +24,8 @@ import {
   Filter,
   CheckCircle2,
   Calendar,
-  Sparkles
+  Sparkles,
+  RefreshCw
 } from 'lucide-react';
 
 interface ExecutiveReportViewProps {
@@ -98,6 +99,7 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
   };
 
   const [isSavingTarget, setIsSavingTarget] = useState(false);
+  const [isSyncingSheetsTarget, setIsSyncingSheetsTarget] = useState(false);
 
   // Mantém os campos do formulário sincronizados com as atualizações remotas de meta
   useEffect(() => {
@@ -157,6 +159,16 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
       } finally {
         setIsSavingTarget(false);
       }
+    }
+  };
+
+  const handleSyncSheetsTarget = async () => {
+    setIsSyncingSheetsTarget(true);
+    try {
+      await SheetsService.syncTargetFromGoogleSheets();
+      onDataRefresh();
+    } finally {
+      setIsSyncingSheetsTarget(false);
     }
   };
 
@@ -430,20 +442,37 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
             </h3>
             <span className="text-[11px] bg-emerald-50 text-emerald-700 font-medium px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
-              <span>Sincronizada em tempo real para todos os usuários</span>
+              <span>Sincronizada em tempo real</span>
             </span>
+            {targetConfig.updatedBy?.includes('Planilha') ? (
+              <span className="text-[11px] bg-blue-50 text-blue-700 font-semibold px-2 py-0.5 rounded border border-blue-200">
+                Aba Config (Planilha)
+              </span>
+            ) : null}
             {targetConfig.updatedAt && (
               <span className="text-[10px] text-slate-400">
-                (Última alteração: {new Date(targetConfig.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}{targetConfig.updatedBy ? ` por ${targetConfig.updatedBy}` : ''})
+                (Última atualização: {new Date(targetConfig.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}{targetConfig.updatedBy ? ` · ${targetConfig.updatedBy}` : ''})
               </span>
             )}
           </div>
-          <button
-            onClick={() => setIsEditingTarget(!isEditingTarget)}
-            className="text-xs text-slate-600 hover:text-slate-900 underline font-semibold cursor-pointer"
-          >
-            {isEditingTarget ? 'Fechar Edição' : 'Ajustar Meta'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleSyncSheetsTarget}
+              disabled={isSyncingSheetsTarget}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded transition-colors disabled:opacity-50 cursor-pointer shadow-2xs"
+              title="Lê imediatamente a meta configurada na aba Config da planilha Google Sheets"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 ${isSyncingSheetsTarget ? 'animate-spin' : ''}`} />
+              <span>{isSyncingSheetsTarget ? 'Sincronizando...' : 'Puxar da Planilha'}</span>
+            </button>
+            <button
+              onClick={() => setIsEditingTarget(!isEditingTarget)}
+              className="text-xs text-slate-600 hover:text-slate-900 underline font-semibold cursor-pointer"
+            >
+              {isEditingTarget ? 'Fechar Edição' : 'Ajustar Meta'}
+            </button>
+          </div>
         </div>
 
         {isEditingTarget && (

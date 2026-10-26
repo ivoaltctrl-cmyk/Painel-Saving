@@ -111,6 +111,65 @@ async function startServer() {
 // SSE clients connected for live target synchronization across all users
 const sseTargetClients = new Set<express.Response>();
 
+const GOOGLE_SHEET_ID = '1F2MPp5fuor41sKCJIgq7D3sbu9AL1dWBBusNX4XZcGE';
+let lastSheetTargetCheck = 0;
+
+async function syncTargetFromGoogleSheets(sheetId = GOOGLE_SHEET_ID): Promise<typeof currentTargetConfig> {
+  try {
+    const configUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=Config`;
+    const response = await fetch(configUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+
+    if (response.ok) {
+      const csv = await response.text();
+      // Espera linhas no formato:
+      // "Meta"
+      // "10000"
+      const lines = csv.split('\n').map(l => l.trim().replace(/^"|"$/g, '')).filter(Boolean);
+      if (lines.length >= 2) {
+        let rawVal = lines[1].replace(/"/g, '').replace('R$', '').trim();
+        let parsedVal = NaN;
+        if (rawVal.includes('.') && rawVal.includes(',')) {
+          parsedVal = parseFloat(rawVal.replace(/\./g, '').replace(',', '.'));
+        } else if (rawVal.includes(',')) {
+          parsedVal = parseFloat(rawVal.replace(',', '.'));
+        } else {
+          parsedVal = parseFloat(rawVal);
+        }
+
+        if (!isNaN(parsedVal) && parsedVal > 0) {
+          const hasChanged = currentTargetConfig.targetValue !== parsedVal || currentTargetConfig.updatedBy !== 'Planilha Google Sheets (Aba Config)';
+          currentTargetConfig = {
+            targetType: 'value',
+            targetValue: parsedVal,
+            month: currentTargetConfig.month || '2026-10',
+            updatedAt: new Date().toISOString(),
+            updatedBy: 'Planilha Google Sheets (Aba Config)'
+          };
+
+          try {
+            fs.writeFileSync(TARGET_FILE, JSON.stringify(currentTargetConfig, null, 2), 'utf-8');
+            console.log('[Server] Meta sincronizada com sucesso da aba Config do Google Sheets:', parsedVal);
+          } catch (err) {
+            console.error('[Server] Erro ao gravar target-config.json:', err);
+          }
+
+          if (hasChanged) {
+            broadcastTargetUpdate(currentTargetConfig);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Server] Falha ao sincronizar aba Config do Google Sheets:', err);
+  }
+
+  return currentTargetConfig;
+}
+
 function getLatestTargetConfig() {
   try {
     if (fs.existsSync(TARGET_FILE)) {
@@ -137,14 +196,34 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
   }
 }
 
-  // GET /api/mobility/target - Retorna a meta de saving compartilhada por todos os usuários (sem cache)
-  app.get('/api/mobility/target', (_req, res) => {
+  // GET /api/mobility/target - Retorna a meta de saving compartilhada por todos os usuários
+  app.get('/api/mobility/target', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
+
+    // Sincroniza com a aba Config da planilha se passou mais de 5s ou forçado
+    const now = Date.now();
+    const shouldRefresh = req.query.refresh === 'true' || (now - lastSheetTargetCheck > 5000);
+    if (shouldRefresh) {
+      lastSheetTargetCheck = now;
+      await syncTargetFromGoogleSheets();
+    }
+
     res.json({
       success: true,
       target: getLatestTargetConfig()
+    });
+  });
+
+  // POST /api/mobility/target/sync-sheets - Força a sincronização imediata da meta a partir da aba Config do Google Sheets
+  app.post('/api/mobility/target/sync-sheets', async (_req, res) => {
+    lastSheetTargetCheck = Date.now();
+    const updated = await syncTargetFromGoogleSheets();
+    res.json({
+      success: true,
+      target: updated,
+      message: `Meta sincronizada diretamente da aba Config do Google Sheets: R$ ${updated.targetValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
     });
   });
 
@@ -224,6 +303,9 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
       const requestedGid = gidMatch ? gidMatch[1] : null;
 
       if (sheetId) {
+        // Sincroniza também a meta a partir da aba Config da planilha
+        syncTargetFromGoogleSheets(sheetId).catch(() => {});
+
         // Tenta primeiro o gid requisitado ou 0
         const initialGid = requestedGid !== null ? requestedGid : '0';
         const targetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${initialGid}`;
@@ -395,6 +477,12 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Mobility API Server] Rodando em http://0.0.0.0:${PORT}`);
+    // Sincroniza a meta diretamente da aba Config do Google Sheets no boot
+    syncTargetFromGoogleSheets();
+    // Monitora alterações na aba Config da planilha a cada 30 segundos
+    setInterval(() => {
+      syncTargetFromGoogleSheets();
+    }, 30000);
   });
 }
 

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { DailySavingRecord, UberCsvTripRecord } from '../types/mobility';
-import { Users, TrendingUp, DollarSign, Calendar, ChevronRight, MapPin, Award } from 'lucide-react';
+import { Users, TrendingUp, DollarSign, Calendar, ChevronRight, MapPin, Award, MousePointerClick } from 'lucide-react';
 
 interface DailySavingChartProps {
   dailyRecords: DailySavingRecord[];
@@ -370,7 +370,7 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
         {activeRecord && (
           <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-lg text-xs">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-2 border-b border-slate-200 gap-2">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Calendar className="w-4 h-4 text-slate-600" />
                 <span className="font-bold text-slate-900 text-sm">
                   Detalhamento do Dia {activeRecord.displayDate}
@@ -379,8 +379,12 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
                 <span className="font-mono tabular-nums text-slate-600">
                   {activeRecord.tripCount} viagens realizadas
                 </span>
+                <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 bg-white border border-slate-200/80 px-2 py-0.5 rounded-md shadow-2xs font-normal">
+                  <MousePointerClick className="w-3 h-3 text-slate-400" />
+                  Clique nas colunas do gráfico para ver outro dia
+                </span>
               </div>
-              <span className="px-2 py-0.5 rounded font-mono font-bold text-emerald-800 bg-emerald-100 text-xs">
+              <span className="px-2 py-0.5 rounded font-mono font-bold text-emerald-800 bg-emerald-100 text-xs shrink-0">
                 Saving: +{formatPercent(activeRecord.savingPercent)} ({formatBRL(activeRecord.saving)})
               </span>
             </div>

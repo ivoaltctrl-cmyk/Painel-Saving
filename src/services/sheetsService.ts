@@ -358,6 +358,29 @@ export class SheetsService {
     return this.getSavingTarget();
   }
 
+  public static async syncTargetFromGoogleSheets(): Promise<SavingTargetConfig> {
+    try {
+      const res = await fetch('/api/mobility/target/sync-sheets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success && data.target) {
+          this.savingTarget = { ...DEFAULT_SAVING_TARGET, ...data.target };
+          try {
+            localStorage.setItem(LOCAL_STORAGE_SAVING_TARGET, JSON.stringify(this.savingTarget));
+          } catch {}
+          this.notifyTargetListeners(this.savingTarget);
+          return this.savingTarget;
+        }
+      }
+    } catch (e) {
+      console.warn('[SheetsService] Falha ao sincronizar meta da planilha:', e);
+    }
+    return this.getSavingTarget();
+  }
+
   public static getSavingTarget(): SavingTargetConfig {
     if (this.savingTarget && this.savingTarget.targetValue > 0 && this.savingTarget.targetValue !== 6000) {
       return this.savingTarget;
