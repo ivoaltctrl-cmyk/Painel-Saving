@@ -43,7 +43,7 @@ export const DEFAULT_AUDIT_LOGS: TariffAuditLog[] = [
 
 export const DEFAULT_SAVING_TARGET: SavingTargetConfig = {
   targetType: 'value',
-  targetValue: 6000,
+  targetValue: 100000,
   month: '2026-10',
 };
 
@@ -247,7 +247,7 @@ export class SheetsService {
       try {
         this.broadcastChannel = new BroadcastChannel('mobility_target_channel');
         this.broadcastChannel.onmessage = (event) => {
-          if (event.data && typeof event.data.targetValue === 'number') {
+          if (event.data && typeof event.data.targetValue === 'number' && event.data.targetValue !== 6000) {
             this.savingTarget = { ...DEFAULT_SAVING_TARGET, ...event.data };
             try {
               localStorage.setItem(LOCAL_STORAGE_SAVING_TARGET, JSON.stringify(this.savingTarget));
@@ -267,8 +267,9 @@ export class SheetsService {
         this.eventSource.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
-            if (data && typeof data.targetValue === 'number') {
+            if (data && typeof data.targetValue === 'number' && data.targetValue !== 6000) {
               const hasChanged = 
+                !this.savingTarget ||
                 this.savingTarget.targetValue !== data.targetValue ||
                 this.savingTarget.targetType !== data.targetType ||
                 this.savingTarget.updatedAt !== data.updatedAt;
@@ -299,7 +300,7 @@ export class SheetsService {
       if (e.key === LOCAL_STORAGE_SAVING_TARGET && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
-          if (parsed && typeof parsed.targetValue === 'number') {
+          if (parsed && typeof parsed.targetValue === 'number' && parsed.targetValue !== 6000) {
             this.savingTarget = { ...DEFAULT_SAVING_TARGET, ...parsed };
             this.notifyTargetListeners(this.savingTarget);
           }
@@ -330,11 +331,15 @@ export class SheetsService {
       if (res.ok) {
         const data = await res.json();
         if (data && data.success && data.target && typeof data.target.targetValue === 'number') {
+          if (data.target.targetValue === 6000) {
+            return this.getSavingTarget();
+          }
           const remoteTarget: SavingTargetConfig = { ...DEFAULT_SAVING_TARGET, ...data.target };
+          const previousVal = this.savingTarget?.targetValue;
           const hasChanged = 
-            this.savingTarget.targetValue !== remoteTarget.targetValue ||
-            this.savingTarget.targetType !== remoteTarget.targetType ||
-            this.savingTarget.updatedAt !== remoteTarget.updatedAt;
+            previousVal !== remoteTarget.targetValue ||
+            this.savingTarget?.targetType !== remoteTarget.targetType ||
+            this.savingTarget?.updatedAt !== remoteTarget.updatedAt;
 
           this.savingTarget = remoteTarget;
           try {
@@ -354,21 +359,33 @@ export class SheetsService {
   }
 
   public static getSavingTarget(): SavingTargetConfig {
-    if (this.savingTarget && this.savingTarget.targetValue > 0) {
+    if (this.savingTarget && this.savingTarget.targetValue > 0 && this.savingTarget.targetValue !== 6000) {
       return this.savingTarget;
     }
     try {
+      // Purga qualquer chave com o 6000 indesejado
+      const oldKeys = ['mobility_saving_target', 'mobility_saving_target_v4'];
+      for (const k of oldKeys) {
+        const val = localStorage.getItem(k);
+        if (val && val.includes('6000')) {
+          localStorage.removeItem(k);
+        }
+      }
+
       const stored = localStorage.getItem(LOCAL_STORAGE_SAVING_TARGET);
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (parsed && typeof parsed.targetValue === 'number') {
+        if (parsed && typeof parsed.targetValue === 'number' && parsed.targetValue > 0 && parsed.targetValue !== 6000) {
           this.savingTarget = { ...DEFAULT_SAVING_TARGET, ...parsed };
           return this.savingTarget;
+        } else if (parsed && parsed.targetValue === 6000) {
+          localStorage.removeItem(LOCAL_STORAGE_SAVING_TARGET);
         }
       }
     } catch {
       // fallback
     }
+    this.savingTarget = { ...DEFAULT_SAVING_TARGET };
     return this.savingTarget;
   }
 

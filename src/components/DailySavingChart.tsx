@@ -32,15 +32,15 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
   const totalTrips = dailyRecords.reduce((acc, r) => acc + r.tripCount, 0);
   const totalPassengers = dailyRecords.reduce((acc, r) => acc + r.passengerCount, 0);
 
-  const maxDailyTaxi = Math.max(...dailyRecords.map(r => r.taxiSpend), 5000);
-  const maxCumulative = Math.max(...dailyRecords.map(r => r.cumulativeSaving), 6000) * 1.14;
+  const maxDailyTaxi = Math.max(...dailyRecords.map(r => r.taxiSpend), 1000) * 1.05;
+  const maxCumulative = Math.max(...dailyRecords.map(r => r.cumulativeSaving), 1000) * 1.14;
 
-  const svgWidth = 780;
-  const svgHeight = 310;
+  const svgWidth = 860;
+  const svgHeight = 330;
   const paddingLeft = 85;
   const paddingRight = 85;
-  const paddingTop = 45;
-  const paddingBottom = 45;
+  const paddingTop = 40;
+  const paddingBottom = 55;
   const chartWidth = svgWidth - paddingLeft - paddingRight;
   const chartHeight = svgHeight - paddingTop - paddingBottom;
 
@@ -260,10 +260,10 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
                     rx="4"
                     fill="#059669"
                   />
-                  {/* High-contrast Saving % label INSIDE the green bar (avoids overlap with line above) */}
+                  {/* High-contrast Saving % label INSIDE the green bar - centered and clean */}
                   <text
                     x={bar2X + barWidth / 2}
-                    y={taxiY + Math.min(Math.max(13, savingH / 2), 20)}
+                    y={taxiY + Math.max(12, Math.min(savingH / 2 + 4, savingH - 4))}
                     textAnchor="middle"
                     fontSize="10"
                     fill="#FFFFFF"
@@ -271,30 +271,29 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
                   >
                     +{formatPercent(r.savingPercent)}
                   </text>
-                  {savingH >= 34 && (
-                    <text
-                      x={bar2X + barWidth / 2}
-                      y={taxiY + Math.min(Math.max(25, savingH / 2 + 12), 34)}
-                      textAnchor="middle"
-                      fontSize="9"
-                      fill="#DCFCE7"
-                      className="font-mono tabular-nums font-semibold select-none pointer-events-none"
-                    >
-                      {formatBRL(r.saving)}
-                    </text>
-                  )}
 
-                  {/* X Axis Label */}
+                  {/* X Axis Label: 2 linhas organizadas para eliminar sobreposição horizontal entre dias */}
                   <text
                     x={groupX + barGroupWidth / 2}
-                    y={svgHeight - 12}
+                    y={svgHeight - 24}
                     textAnchor="middle"
                     fontSize="11"
-                    fill={isSelected ? '#0F172A' : '#475569'}
+                    fill={isSelected ? '#0F172A' : '#334155'}
                     fontWeight={isSelected ? '700' : '600'}
                     className="font-mono tabular-nums"
                   >
-                    Dia {r.displayDate} ({r.tripCount} viagens)
+                    Dia {r.displayDate}
+                  </text>
+                  <text
+                    x={groupX + barGroupWidth / 2}
+                    y={svgHeight - 10}
+                    textAnchor="middle"
+                    fontSize="10"
+                    fill={isSelected ? '#2563EB' : '#64748B'}
+                    fontWeight={isSelected ? '600' : '500'}
+                    className="font-mono tabular-nums"
+                  >
+                    {r.tripCount} viagens
                   </text>
                 </g>
               );
@@ -313,10 +312,10 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
 
             {/* Cumulative Nodes & Non-colliding Pill Badges */}
             {cumulativePoints.map((pt, idx) => {
-              const pillWidth = 104;
-              const pillHeight = 20;
+              const pillWidth = 86;
+              const pillHeight = 18;
               const pillX = pt.x - pillWidth / 2;
-              const pillY = Math.max(6, pt.y - 28);
+              const pillY = Math.max(8, pt.y - 24);
 
               return (
                 <g key={`cum-${idx}`} className="pointer-events-none">
@@ -334,7 +333,7 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
                   <circle
                     cx={pt.x}
                     cy={pt.y}
-                    r="4.5"
+                    r="4"
                     fill="#2563EB"
                     stroke="#FFFFFF"
                     strokeWidth="2"
@@ -353,9 +352,9 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
                   />
                   <text
                     x={pt.x}
-                    y={pillY + 14}
+                    y={pillY + 12.5}
                     textAnchor="middle"
-                    fontSize="10"
+                    fontSize="9"
                     fill="#1D4ED8"
                     className="font-mono tabular-nums font-bold"
                   >

@@ -23,7 +23,7 @@ if (!fs.existsSync(DATA_DIR)) {
 // Default target
 let currentTargetConfig = {
   targetType: 'value' as 'value' | 'percent',
-  targetValue: 6000,
+  targetValue: 100000,
   month: '2026-10',
   updatedAt: new Date().toISOString(),
   updatedBy: 'Sistema'

@@ -121,7 +121,7 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
       }
     }
 
-    // Se contiver apenas vírgula: "100000,50" ou "6000,00" ou "60,5"
+    // Se contiver apenas vírgula: "100000,50" ou "50000,00" ou "60,5"
     if (clean.includes(',')) {
       return parseFloat(clean.replace(',', '.'));
     }

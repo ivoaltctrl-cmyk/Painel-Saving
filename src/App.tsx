@@ -45,10 +45,8 @@ export default function App() {
     byDistrict: BreakdownSlice[];
     byCostCenter: BreakdownSlice[];
   }>({ byShift: [], byDistrict: [], byCostCenter: [] });
-  const [targetConfig, setTargetConfig] = useState<SavingTargetConfig>({
-    targetType: 'value',
-    targetValue: 6000,
-    month: '2026-10',
+  const [targetConfig, setTargetConfig] = useState<SavingTargetConfig>(() => {
+    return SheetsService.getSavingTarget();
   });
   const [isTariffModalOpen, setIsTariffModalOpen] = useState(false);
   const [isDataUpdateModalOpen, setIsDataUpdateModalOpen] = useState(false);
