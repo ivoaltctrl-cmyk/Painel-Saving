@@ -21,12 +21,19 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 // Default target
-let currentTargetConfig = {
-  targetType: 'value' as 'value' | 'percent',
-  targetValue: 100000,
+let currentTargetConfig: {
+  targetType: 'value' | 'percent';
+  targetValue: number;
+  month: string;
+  updatedAt: string;
+  updatedBy: string;
+  sheetsWebhookUrl?: string;
+} = {
+  targetType: 'value',
+  targetValue: 50000,
   month: '2026-10',
   updatedAt: new Date().toISOString(),
-  updatedBy: 'Sistema'
+  updatedBy: 'Planilha Google Sheets (Aba Config)'
 };
 
 // Load persisted target config if exists
@@ -116,9 +123,12 @@ let lastSheetTargetCheck = 0;
 
 async function syncTargetFromGoogleSheets(sheetId = GOOGLE_SHEET_ID): Promise<typeof currentTargetConfig> {
   try {
-    const configUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=Config`;
+    const configUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=Config&tq=&_t=${Date.now()}`;
     const response = await fetch(configUrl, {
+      cache: 'no-store',
       headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       }
     });
@@ -127,7 +137,7 @@ async function syncTargetFromGoogleSheets(sheetId = GOOGLE_SHEET_ID): Promise<ty
       const csv = await response.text();
       // Espera linhas no formato:
       // "Meta"
-      // "10000"
+      // "50000"
       const lines = csv.split('\n').map(l => l.trim().replace(/^"|"$/g, '')).filter(Boolean);
       if (lines.length >= 2) {
         let rawVal = lines[1].replace(/"/g, '').replace('R$', '').trim();
@@ -197,18 +207,13 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
 }
 
   // GET /api/mobility/target - Retorna a meta de saving compartilhada por todos os usuários
-  app.get('/api/mobility/target', async (req, res) => {
+  app.get('/api/mobility/target', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
 
-    // Sincroniza com a aba Config da planilha se passou mais de 5s ou forçado
-    const now = Date.now();
-    const shouldRefresh = req.query.refresh === 'true' || (now - lastSheetTargetCheck > 5000);
-    if (shouldRefresh) {
-      lastSheetTargetCheck = now;
-      await syncTargetFromGoogleSheets();
-    }
+    // Sincroniza sempre com a aba Config da planilha com anti-cache
+    await syncTargetFromGoogleSheets();
 
     res.json({
       success: true,
@@ -218,7 +223,6 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
 
   // POST /api/mobility/target/sync-sheets - Força a sincronização imediata da meta a partir da aba Config do Google Sheets
   app.post('/api/mobility/target/sync-sheets', async (_req, res) => {
-    lastSheetTargetCheck = Date.now();
     const updated = await syncTargetFromGoogleSheets();
     res.json({
       success: true,
@@ -258,18 +262,22 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
 
   // POST /api/mobility/target - Atualiza a meta de saving globalmente para todos os usuários
   app.post('/api/mobility/target', (req, res) => {
-    const { targetType, targetValue, month, updatedBy } = req.body;
+    const { targetType, targetValue, month, updatedBy, sheetsWebhookUrl } = req.body;
     let numVal = typeof targetValue === 'number' ? targetValue : parseFloat(String(targetValue).replace(',', '.'));
     if (isNaN(numVal) || numVal <= 0) {
       return res.status(400).json({ error: 'targetValue deve ser um número positivo.' });
     }
 
+    const webhookToUse = sheetsWebhookUrl !== undefined ? sheetsWebhookUrl : currentTargetConfig.sheetsWebhookUrl;
+
     currentTargetConfig = {
+      ...currentTargetConfig,
       targetType: targetType === 'percent' ? 'percent' : 'value',
       targetValue: Number(numVal),
       month: month || currentTargetConfig.month || '2026-10',
       updatedAt: new Date().toISOString(),
-      updatedBy: updatedBy || 'Gestor de Mobilidade'
+      updatedBy: updatedBy || 'Gestor de Mobilidade',
+      sheetsWebhookUrl: webhookToUse
     };
 
     try {
@@ -277,6 +285,21 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
       console.log('[Server] Meta global de saving atualizada e salva em disco:', currentTargetConfig);
     } catch (err) {
       console.error('[Server] Erro ao gravar target-config.json:', err);
+    }
+
+    // Se houver Webhook URL do Google Apps Script configurado, grava automaticamente na planilha
+    if (webhookToUse && typeof webhookToUse === 'string' && webhookToUse.trim()) {
+      fetch(webhookToUse.trim(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetValue: Number(numVal),
+          targetType: currentTargetConfig.targetType,
+          month: currentTargetConfig.month,
+          updatedAt: currentTargetConfig.updatedAt
+        })
+      }).then(r => console.log('[Server] Apps Script Webhook executado com status:', r.status))
+        .catch(err => console.warn('[Server] Falha ao enviar para Apps Script Webhook:', err));
     }
 
     // Transmite a nova meta instantaneamente a todos os navegadores conectados via SSE

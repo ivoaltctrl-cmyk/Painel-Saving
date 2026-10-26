@@ -99,6 +99,11 @@ export default function App() {
     });
 
     const init = async () => {
+      // 1. Sincroniza a meta diretamente da aba Config do Google Sheets
+      const freshTarget = await SheetsService.syncTargetFromGoogleSheets();
+      setTargetConfig(freshTarget);
+
+      // 2. Carrega as corridas e recalcula o painel
       await SheetsService.loadInitialData();
       const existingTrips = SheetsService.getTrips();
       const dates = Array.from(new Set(existingTrips.map(t => t.requestDateLocal).filter(Boolean))).sort();

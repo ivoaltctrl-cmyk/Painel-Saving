@@ -39,6 +39,7 @@ export interface SavingTargetConfig {
   month: string; // ex: "2026-10"
   updatedAt?: string;
   updatedBy?: string;
+  sheetsWebhookUrl?: string; // URL do Web App Google Apps Script para gravação bidirecional
 }
 
 export interface UberCsvTripRecord {

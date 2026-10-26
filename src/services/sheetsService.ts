@@ -43,7 +43,7 @@ export const DEFAULT_AUDIT_LOGS: TariffAuditLog[] = [
 
 export const DEFAULT_SAVING_TARGET: SavingTargetConfig = {
   targetType: 'value',
-  targetValue: 100000,
+  targetValue: 50000,
   month: '2026-10',
 };
 
@@ -323,51 +323,20 @@ export class SheetsService {
   }
 
   public static async fetchSavingTarget(): Promise<SavingTargetConfig> {
+    return this.syncTargetFromGoogleSheets();
+  }
+
+  public static async syncTargetFromGoogleSheets(): Promise<SavingTargetConfig> {
+    // 1. Tenta via backend proxy (sem qualquer restrição de CORS e com anti-cache garantido)
     try {
-      const res = await fetch(`/api/mobility/target?_t=${Date.now()}`, {
-        cache: 'no-store',
-        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+      const res = await fetch(`/api/mobility/target?refresh=true&_t=${Date.now()}`, {
+        cache: 'no-store'
       });
       if (res.ok) {
         const data = await res.json();
         if (data && data.success && data.target && typeof data.target.targetValue === 'number') {
-          if (data.target.targetValue === 6000) {
-            return this.getSavingTarget();
-          }
           const remoteTarget: SavingTargetConfig = { ...DEFAULT_SAVING_TARGET, ...data.target };
-          const previousVal = this.savingTarget?.targetValue;
-          const hasChanged = 
-            previousVal !== remoteTarget.targetValue ||
-            this.savingTarget?.targetType !== remoteTarget.targetType ||
-            this.savingTarget?.updatedAt !== remoteTarget.updatedAt;
-
           this.savingTarget = remoteTarget;
-          try {
-            localStorage.setItem(LOCAL_STORAGE_SAVING_TARGET, JSON.stringify(this.savingTarget));
-          } catch {}
-
-          if (hasChanged) {
-            this.notifyTargetListeners(this.savingTarget);
-          }
-          return this.savingTarget;
-        }
-      }
-    } catch (e) {
-      console.warn('[SheetsService] Falha ao carregar meta remota, usando cache local:', e);
-    }
-    return this.getSavingTarget();
-  }
-
-  public static async syncTargetFromGoogleSheets(): Promise<SavingTargetConfig> {
-    try {
-      const res = await fetch('/api/mobility/target/sync-sheets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.success && data.target) {
-          this.savingTarget = { ...DEFAULT_SAVING_TARGET, ...data.target };
           try {
             localStorage.setItem(LOCAL_STORAGE_SAVING_TARGET, JSON.stringify(this.savingTarget));
           } catch {}
@@ -376,8 +345,56 @@ export class SheetsService {
         }
       }
     } catch (e) {
-      console.warn('[SheetsService] Falha ao sincronizar meta da planilha:', e);
+      console.warn('[SheetsService] Falha ao sincronizar via backend proxy:', e);
     }
+
+    // 2. Fallback direto da aba Config no Google Sheets via cliente (sem cabeçalhos customizados para não acionar preflight CORS)
+    try {
+      const directUrl = `https://docs.google.com/spreadsheets/d/1F2MPp5fuor41sKCJIgq7D3sbu9AL1dWBBusNX4XZcGE/gviz/tq?tqx=out:csv&sheet=Config&tq=&_t=${Date.now()}`;
+      const directRes = await fetch(directUrl);
+      if (directRes.ok) {
+        const csv = await directRes.text();
+        const lines = csv.split('\n').map(l => l.trim().replace(/^"|"$/g, '')).filter(Boolean);
+        if (lines.length >= 2) {
+          let rawVal = lines[1].replace(/"/g, '').replace('R$', '').trim();
+          let parsedVal = NaN;
+          if (rawVal.includes('.') && rawVal.includes(',')) {
+            parsedVal = parseFloat(rawVal.replace(/\./g, '').replace(',', '.'));
+          } else if (rawVal.includes(',')) {
+            parsedVal = parseFloat(rawVal.replace(',', '.'));
+          } else {
+            parsedVal = parseFloat(rawVal);
+          }
+
+          if (!isNaN(parsedVal) && parsedVal > 0) {
+            const cleanTarget: SavingTargetConfig = {
+              targetType: 'value',
+              targetValue: parsedVal,
+              month: this.savingTarget?.month || '2026-10',
+              updatedAt: new Date().toISOString(),
+              updatedBy: 'Planilha Google Sheets (Aba Config)'
+            };
+            this.savingTarget = cleanTarget;
+            try {
+              localStorage.setItem(LOCAL_STORAGE_SAVING_TARGET, JSON.stringify(cleanTarget));
+            } catch {}
+            this.notifyTargetListeners(cleanTarget);
+
+            // Avisa o servidor em background
+            fetch('/api/mobility/target', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(cleanTarget)
+            }).catch(() => {});
+
+            return cleanTarget;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[SheetsService] Leitura direta falhou:', e);
+    }
+
     return this.getSavingTarget();
   }
 

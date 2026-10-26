@@ -25,7 +25,12 @@ import {
   CheckCircle2,
   Calendar,
   Sparkles,
-  RefreshCw
+  RefreshCw,
+  Code,
+  Copy,
+  Check,
+  ExternalLink,
+  X
 } from 'lucide-react';
 
 interface ExecutiveReportViewProps {
@@ -100,11 +105,98 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
 
   const [isSavingTarget, setIsSavingTarget] = useState(false);
   const [isSyncingSheetsTarget, setIsSyncingSheetsTarget] = useState(false);
+  const [webhookUrlInput, setWebhookUrlInput] = useState<string>(targetConfig.sheetsWebhookUrl || '');
+  const [showScriptModal, setShowScriptModal] = useState(false);
+  const [copiedScript, setCopiedScript] = useState(false);
+
+  const APPS_SCRIPT_CODE = `/**
+ * INTEGRAÇÃO BIDIRECIONAL DA META DE SAVING
+ * Planilha: SavingTransporteAvulso
+ * Aba: Config (Célula A1 = "Meta", Célula A2 = Valor numérico da meta)
+ */
+
+function doPost(e) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Config");
+    if (!sheet) {
+      sheet = ss.insertSheet("Config");
+    }
+    
+    // Garante que o cabeçalho existe na A1
+    sheet.getRange("A1").setValue("Meta");
+    
+    var data = {};
+    if (e && e.postData && e.postData.contents) {
+      try {
+        data = JSON.parse(e.postData.contents);
+      } catch (err) {
+        data = { targetValue: e.postData.contents };
+      }
+    } else if (e && e.parameter) {
+      data = e.parameter;
+    }
+    
+    var metaVal = data.targetValue || data.meta || data.value;
+    if (metaVal !== undefined && metaVal !== null && metaVal !== '') {
+      var numVal = Number(metaVal);
+      sheet.getRange("A2").setValue(isNaN(numVal) ? metaVal : numVal);
+    }
+    
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "success",
+      message: "Meta atualizada com sucesso na aba Config da planilha!",
+      targetValue: metaVal
+    })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "error",
+      message: err.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doGet(e) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName("Config");
+    if (!sheet) {
+      sheet = ss.insertSheet("Config");
+      sheet.getRange("A1").setValue("Meta");
+      sheet.getRange("A2").setValue(50000);
+    }
+    
+    // Se receber ?meta=50000 na URL GET, também atualiza a célula A2
+    if (e && e.parameter && (e.parameter.meta || e.parameter.targetValue)) {
+      var metaVal = e.parameter.meta || e.parameter.targetValue;
+      var numVal = Number(metaVal);
+      sheet.getRange("A2").setValue(isNaN(numVal) ? metaVal : numVal);
+    }
+    
+    var val = sheet.getRange("A2").getValue();
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "success",
+      meta: val
+    })).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "error",
+      message: err.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}`;
+
+  const handleCopyScript = () => {
+    navigator.clipboard.writeText(APPS_SCRIPT_CODE);
+    setCopiedScript(true);
+    setTimeout(() => setCopiedScript(false), 2500);
+  };
 
   // Mantém os campos do formulário sincronizados com as atualizações remotas de meta
   useEffect(() => {
     setTargetTypeInput(targetConfig.targetType);
     setTargetValueInput(targetConfig.targetValue.toString());
+    setWebhookUrlInput(targetConfig.sheetsWebhookUrl || '');
   }, [targetConfig]);
 
   // Parser robusto para números no formato brasileiro (ex: 100.000 ou 100.000,00) e padrão (100000)
@@ -152,7 +244,8 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
           targetType: targetTypeInput,
           targetValue: val,
           month: targetConfig.month || '2026-10',
-          updatedBy: 'Gestor de Mobilidade'
+          updatedBy: 'Gestor de Mobilidade',
+          sheetsWebhookUrl: webhookUrlInput.trim()
         });
         setIsEditingTarget(false);
         onDataRefresh();
@@ -476,35 +569,64 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
         </div>
 
         {isEditingTarget && (
-          <form onSubmit={handleSaveTarget} className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-md text-xs flex flex-wrap items-center gap-3">
-            <span className="text-slate-700 font-medium">Tipo de Meta:</span>
-            <select
-              value={targetTypeInput}
-              onChange={(e) => setTargetTypeInput(e.target.value as any)}
-              className="px-2 py-1 border border-slate-300 rounded bg-white"
-            >
-              <option value="value">Valor Financeiro (R$)</option>
-              <option value="percent">Percentual de Redução (%)</option>
-            </select>
-            <div className="flex items-center gap-1.5">
-              <input
-                type="text"
-                value={targetValueInput}
-                onChange={(e) => setTargetValueInput(e.target.value)}
-                placeholder={targetTypeInput === 'value' ? 'Ex: 100000 ou 100.000' : 'Ex: 60 ou 60%'}
-                className="w-32 px-2 py-1 border border-slate-300 rounded bg-white font-mono font-bold"
-              />
-              <span className="text-slate-400 text-[11px]">
-                {targetTypeInput === 'value' ? 'R$' : '%'}
-              </span>
+          <form onSubmit={handleSaveTarget} className="mt-3 p-3.5 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-slate-700 font-semibold">Tipo de Meta:</span>
+              <select
+                value={targetTypeInput}
+                onChange={(e) => setTargetTypeInput(e.target.value as any)}
+                className="px-2 py-1 border border-slate-300 rounded bg-white font-medium"
+              >
+                <option value="value">Valor Financeiro (R$)</option>
+                <option value="percent">Percentual de Redução (%)</option>
+              </select>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={targetValueInput}
+                  onChange={(e) => setTargetValueInput(e.target.value)}
+                  placeholder={targetTypeInput === 'value' ? 'Ex: 50000 ou 50.000' : 'Ex: 60 ou 60%'}
+                  className="w-36 px-2.5 py-1 border border-slate-300 rounded bg-white font-mono font-bold text-slate-900"
+                />
+                <span className="text-slate-500 font-medium text-[11px]">
+                  {targetTypeInput === 'value' ? 'R$' : '%'}
+                </span>
+              </div>
+              <button
+                type="submit"
+                disabled={isSavingTarget}
+                className="px-3 py-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white rounded font-bold cursor-pointer transition-colors shadow-2xs"
+              >
+                {isSavingTarget ? 'Salvando e Sincronizando...' : 'Salvar para Todos'}
+              </button>
             </div>
-            <button
-              type="submit"
-              disabled={isSavingTarget}
-              className="px-3 py-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white rounded font-bold cursor-pointer transition-colors"
-            >
-              {isSavingTarget ? 'Salvando e Sincronizando...' : 'Salvar para Todos'}
-            </button>
+
+            {/* Sincronização automática com a Planilha Sheets via Webhook Web App */}
+            <div className="pt-2.5 border-t border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-2.5">
+              <div className="flex-1 w-full flex items-center gap-2">
+                <span className="text-slate-600 font-medium whitespace-nowrap text-[11px]">
+                  Webhook Google Sheets (Apps Script):
+                </span>
+                <input
+                  type="url"
+                  value={webhookUrlInput}
+                  onChange={(e) => setWebhookUrlInput(e.target.value)}
+                  placeholder="https://script.google.com/macros/s/.../exec"
+                  className="flex-1 px-2.5 py-1 border border-slate-300 rounded bg-white font-mono text-[11px] text-slate-800 focus:outline-emerald-500"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowScriptModal(true)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded text-[11px] font-semibold cursor-pointer shadow-2xs whitespace-nowrap transition-colors"
+              >
+                <Code className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Ver Script do Apps Script</span>
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              💡 <strong>Dica:</strong> A meta já sincroniza automaticamente da aba <strong>Config</strong> da planilha. Para que edições feitas aqui no painel gravem de volta na célula A2 da planilha sem precisar de login, basta colar a URL do Web App gerada no Google Apps Script.
+            </p>
           </form>
         )}
 
@@ -784,6 +906,131 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
           })}
         </div>
       </div>
+
+      {/* Modal do Google Apps Script para Gravação Automática na Planilha */}
+      {showScriptModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
+          <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col border border-slate-200 overflow-hidden">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-slate-200 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-500/20 text-emerald-400 rounded-lg">
+                  <Code className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">
+                    Script para Gravação Automática no Google Sheets
+                  </h3>
+                  <p className="text-xs text-slate-300">
+                    Permite que a atualização da meta no painel grave automaticamente na aba <strong>Config</strong> (célula A2).
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowScriptModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 overflow-y-auto space-y-5 text-slate-700 text-xs">
+              {/* Instructions steps */}
+              <div className="bg-emerald-50/60 border border-emerald-200/80 rounded-lg p-4 space-y-2.5">
+                <h4 className="font-bold text-emerald-900 text-sm flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  Como implantar em 1 minuto na sua planilha:
+                </h4>
+                <ol className="list-decimal list-inside space-y-1.5 text-emerald-950 font-medium">
+                  <li>
+                    Abra a planilha{' '}
+                    <a
+                      href="https://docs.google.com/spreadsheets/d/1F2MPp5fuor41sKCJIgq7D3sbu9AL1dWBBusNX4XZcGE/edit"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-emerald-700 underline font-bold inline-flex items-center gap-1 hover:text-emerald-900"
+                    >
+                      <span>SavingTransporteAvulso</span>
+                      <ExternalLink className="w-3 h-3 inline" />
+                    </a>.
+                  </li>
+                  <li>No menu superior, vá em <strong>Extensões</strong> &gt; <strong>Apps Script</strong>.</li>
+                  <li>Apague o código que estiver lá e <strong>cole o código abaixo</strong>.</li>
+                  <li>No canto superior direito, clique em <strong>Implantar</strong> &gt; <strong>Nova implantação</strong>.</li>
+                  <li>Clique no ícone de <strong>engrenagem ⚙️</strong> ao lado de &ldquo;Selecionar tipo&rdquo; e escolha <strong>App da Web</strong>.</li>
+                  <li>
+                    Deixe <strong>Executar como:</strong> <em>Eu (seu e-mail)</em> e <strong>Quem tem acesso:</strong> selecione <mark className="bg-amber-100 font-bold px-1 rounded">Qualquer pessoa</mark> (essencial para permitir requisição segura sem travar em login).
+                  </li>
+                  <li>Clique em <strong>Implantar</strong>, autorize as permissões da conta e <strong>copie a URL do app da Web</strong> (termina em <code>/exec</code>).</li>
+                  <li>Cole essa URL no campo <strong>Webhook Google Sheets</strong> aqui no painel e salve!</li>
+                </ol>
+              </div>
+
+              {/* Code Box */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-900 text-xs uppercase tracking-wider">
+                    Código do Google Apps Script (Code.gs)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleCopyScript}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs transition-colors cursor-pointer"
+                  >
+                    {copiedScript ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Copiado com Sucesso!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copiar Código</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <div className="relative">
+                  <pre className="bg-slate-950 text-slate-100 p-4 rounded-lg font-mono text-[11px] leading-relaxed overflow-x-auto max-h-72 border border-slate-800">
+                    <code>{APPS_SCRIPT_CODE}</code>
+                  </pre>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+              <a
+                href="https://docs.google.com/spreadsheets/d/1F2MPp5fuor41sKCJIgq7D3sbu9AL1dWBBusNX4XZcGE/edit"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-slate-600 hover:text-slate-900 inline-flex items-center gap-1 font-semibold"
+              >
+                <span>Abrir Planilha no Google Drive</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleCopyScript}
+                  className="px-3.5 py-1.5 text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-md transition-colors cursor-pointer shadow-2xs"
+                >
+                  {copiedScript ? 'Copiado!' : 'Copiar Código'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowScriptModal(false)}
+                  className="px-4 py-1.5 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-md transition-colors cursor-pointer shadow-2xs"
+                >
+                  Concluir
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
