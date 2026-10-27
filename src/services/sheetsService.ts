@@ -58,7 +58,7 @@ export class SheetsService {
   private static customDateRange: { start: string; end: string } = { start: '', end: '' };
 
   private static config: GoogleSheetsConfig = {
-    sheetUrl: 'https://docs.google.com/spreadsheets/d/1F2MPp5fuor41sKCJIgq7D3sbu9AL1dWBBusNX4XZcGE/edit',
+    sheetUrl: '',
     lastSyncedAt: '23/10/2026 às 11:45',
     status: 'synced',
     autoSyncIntervalMinutes: 15,
@@ -348,53 +348,6 @@ export class SheetsService {
       console.warn('[SheetsService] Falha ao sincronizar via backend proxy:', e);
     }
 
-    // 2. Fallback direto da aba Config no Google Sheets via cliente (sem cabeçalhos customizados para não acionar preflight CORS)
-    try {
-      const directUrl = `https://docs.google.com/spreadsheets/d/1F2MPp5fuor41sKCJIgq7D3sbu9AL1dWBBusNX4XZcGE/gviz/tq?tqx=out:csv&sheet=Config&tq=&_t=${Date.now()}`;
-      const directRes = await fetch(directUrl);
-      if (directRes.ok) {
-        const csv = await directRes.text();
-        const lines = csv.split('\n').map(l => l.trim().replace(/^"|"$/g, '')).filter(Boolean);
-        if (lines.length >= 2) {
-          let rawVal = lines[1].replace(/"/g, '').replace('R$', '').trim();
-          let parsedVal = NaN;
-          if (rawVal.includes('.') && rawVal.includes(',')) {
-            parsedVal = parseFloat(rawVal.replace(/\./g, '').replace(',', '.'));
-          } else if (rawVal.includes(',')) {
-            parsedVal = parseFloat(rawVal.replace(',', '.'));
-          } else {
-            parsedVal = parseFloat(rawVal);
-          }
-
-          if (!isNaN(parsedVal) && parsedVal > 0) {
-            const cleanTarget: SavingTargetConfig = {
-              targetType: 'value',
-              targetValue: parsedVal,
-              month: this.savingTarget?.month || '2026-10',
-              updatedAt: new Date().toISOString(),
-              updatedBy: 'Planilha Google Sheets (Aba Config)'
-            };
-            this.savingTarget = cleanTarget;
-            try {
-              localStorage.setItem(LOCAL_STORAGE_SAVING_TARGET, JSON.stringify(cleanTarget));
-            } catch {}
-            this.notifyTargetListeners(cleanTarget);
-
-            // Avisa o servidor em background
-            fetch('/api/mobility/target', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(cleanTarget)
-            }).catch(() => {});
-
-            return cleanTarget;
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('[SheetsService] Leitura direta falhou:', e);
-    }
-
     return this.getSavingTarget();
   }
 
@@ -675,19 +628,19 @@ export class SheetsService {
     detectedTab?: string;
     error?: string 
   }> {
-    const rawUrl = (urlInput || this.config.sheetUrl || 'https://docs.google.com/spreadsheets/d/1F2MPp5fuor41sKCJIgq7D3sbu9AL1dWBBusNX4XZcGE/edit').trim();
-    this.saveConfig({ sheetUrl: rawUrl, status: 'syncing' });
+    const rawUrl = (urlInput || this.config.sheetUrl || '').trim();
+    this.saveConfig({ status: 'syncing' });
 
     try {
       let csvContent = '';
       let detectedTab = 'Dados Uber';
 
-      // 1. Tenta via proxy backend do Express (resolve CORS, múltiplos tabs e redirecionamentos)
+      // 1. Tenta via proxy backend do Express (resolve CORS, múltiplos tabs e redirecionamentos de forma segura no servidor)
       try {
         const proxyRes = await fetch('/api/mobility/sheets-sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: rawUrl })
+          body: JSON.stringify(rawUrl ? { url: rawUrl } : {})
         });
         if (proxyRes.ok) {
           const proxyData = await proxyRes.json();
@@ -697,7 +650,7 @@ export class SheetsService {
           }
         }
       } catch {
-        // tenta fetch direto no navegador
+        // proxy call failed
       }
 
       // 2. Se o proxy não retornou, tenta fetch direto

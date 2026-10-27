@@ -1,15 +1,17 @@
 import React, { useState } from 'react';
-import { DailySavingRecord, UberCsvTripRecord } from '../types/mobility';
-import { Users, TrendingUp, DollarSign, Calendar, ChevronRight, MapPin, Award, MousePointerClick } from 'lucide-react';
+import { DailySavingRecord, UberCsvTripRecord, SavingTargetConfig } from '../types/mobility';
+import { Users, TrendingUp, DollarSign, Calendar, ChevronRight, MapPin, Award, MousePointerClick, Target, BarChart3, ArrowUpRight } from 'lucide-react';
 
 interface DailySavingChartProps {
   dailyRecords: DailySavingRecord[];
   allTrips?: UberCsvTripRecord[];
+  targetConfig?: SavingTargetConfig;
 }
 
 export const DailySavingChart: React.FC<DailySavingChartProps> = ({ 
   dailyRecords,
-  allTrips = []
+  allTrips = [],
+  targetConfig
 }) => {
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
@@ -32,8 +34,27 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
   const totalTrips = dailyRecords.reduce((acc, r) => acc + r.tripCount, 0);
   const totalPassengers = dailyRecords.reduce((acc, r) => acc + r.passengerCount, 0);
 
+  // Metas e Estimativas (Mensal e Anual)
+  const monthlyTarget = targetConfig?.targetType === 'value' ? targetConfig.targetValue : 100000;
+  const annualTarget = monthlyTarget * 12;
+  const daysInMonth = 30;
+
+  const sampledDays = Math.max(1, dailyRecords.length);
+  const avgDailySaving = totalSaving / sampledDays;
+  const daysRemaining = Math.max(0, daysInMonth - sampledDays);
+
+  const projectedMonthlySaving = avgDailySaving * daysInMonth;
+  const projectedMonthlyPercent = (projectedMonthlySaving / monthlyTarget) * 100;
+  const dailyPaceNeeded = daysRemaining > 0 ? Math.max(0, (monthlyTarget - totalSaving) / daysRemaining) : 0;
+  const paceGap = dailyPaceNeeded - avgDailySaving;
+
+  const annualRunRateSaving = avgDailySaving * 365;
+  const annualProgressPercent = (annualRunRateSaving / annualTarget) * 100;
+
+  // Escala vertical com folga para a linha real acumulada e para a linha da meta
+  const maxTargetCumulative = (monthlyTarget / daysInMonth) * dailyRecords.length;
   const maxDailyTaxi = Math.max(...dailyRecords.map(r => r.taxiSpend), 1000) * 1.05;
-  const maxCumulative = Math.max(...dailyRecords.map(r => r.cumulativeSaving), 1000) * 1.14;
+  const maxCumulative = Math.max(...dailyRecords.map(r => r.cumulativeSaving), maxTargetCumulative, 1000) * 1.15;
 
   const svgWidth = 860;
   const svgHeight = 330;
@@ -54,7 +75,7 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
   const selectedDateStr = dailyRecords[selectedIndex]?.date || '';
   const selectedDayTrips = allTrips.filter(t => t.requestDateLocal === selectedDateStr);
 
-  // Pontos da linha acumulada
+  // Pontos da linha acumulada real
   const cumulativePoints = dailyRecords.map((r, i) => {
     const cx = paddingLeft + i * barGroupWidth + barGroupWidth / 2;
     const cy = paddingTop + chartHeight - (r.cumulativeSaving / maxCumulative) * chartHeight;
@@ -62,6 +83,16 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
   });
 
   const cumulativePolyline = cumulativePoints.map(p => `${p.x},${p.y}`).join(' ');
+
+  // Pontos da linha de ritmo esperado da meta linear
+  const idealTargetPoints = dailyRecords.map((r, i) => {
+    const cx = paddingLeft + i * barGroupWidth + barGroupWidth / 2;
+    const idealVal = (monthlyTarget / daysInMonth) * (i + 1);
+    const cy = paddingTop + chartHeight - (idealVal / maxCumulative) * chartHeight;
+    return { x: cx, y: cy, val: idealVal };
+  });
+
+  const idealTargetPolyline = idealTargetPoints.map(p => `${p.x},${p.y}`).join(' ');
 
   return (
     <div className="space-y-6">
@@ -99,8 +130,68 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
             <div className="flex items-center gap-1.5">
               <span className="w-3.5 h-1 bg-blue-600 inline-block rounded-xs"></span>
               <span className="w-2.5 h-2.5 rounded-full bg-blue-600 border border-white inline-block -ml-1.5"></span>
-              <span className="font-semibold text-blue-700">Linha Acumulada</span>
+              <span className="font-semibold text-blue-700">Saving Acumulado</span>
             </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3.5 h-0.5 border-t-2 border-dashed border-amber-600 inline-block"></span>
+              <span className="w-2 h-2 rounded-full bg-amber-600 border border-white inline-block -ml-1"></span>
+              <span className="font-semibold text-amber-800">Ritmo da Meta ({formatBRL(monthlyTarget / daysInMonth)}/dia)</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Painel Executivo de Estimativas (Mensal & Anual Aplicado na Evolução Diária) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 my-3 p-3 bg-gradient-to-r from-slate-50 via-blue-50/25 to-emerald-50/30 border border-slate-200 rounded-lg text-xs">
+          {/* Ritmo Médio Diário */}
+          <div className="space-y-1">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+              Ritmo Médio da Operação
+            </span>
+            <div className="text-base font-bold font-mono tabular-nums text-slate-900">
+              {formatBRL(avgDailySaving)} <span className="text-xs font-normal text-slate-500">/dia</span>
+            </div>
+            <span className="text-[10px] text-slate-500 block">
+              Média consolidada em {sampledDays} datas apuradas
+            </span>
+          </div>
+
+          {/* Estimativa Mensal */}
+          <div className="space-y-1">
+            <span className="text-[10px] font-bold text-blue-900 uppercase tracking-wider block">
+              Estimativa Mensal (30 dias)
+            </span>
+            <div className="text-base font-bold font-mono tabular-nums text-blue-700">
+              {formatBRL(projectedMonthlySaving)}
+            </div>
+            <span className="text-[10px] font-medium text-blue-800/80 block">
+              {projectedMonthlyPercent.toFixed(1)}% da Meta Mensal ({formatBRL(monthlyTarget)})
+            </span>
+          </div>
+
+          {/* Ritmo Necessário */}
+          <div className="space-y-1">
+            <span className="text-[10px] font-bold text-amber-900 uppercase tracking-wider block">
+              Ritmo Necessário p/ Meta
+            </span>
+            <div className="text-base font-bold font-mono tabular-nums text-amber-800">
+              {formatBRL(dailyPaceNeeded)} <span className="text-xs font-normal text-slate-500">/dia</span>
+            </div>
+            <span className="text-[10px] text-slate-500 block">
+              {paceGap <= 0 ? 'Ritmo atual já atinge a meta!' : `Diferença de ${formatBRL(paceGap)}/dia em ${daysRemaining} dias`}
+            </span>
+          </div>
+
+          {/* Estimativa Anualizada */}
+          <div className="space-y-1">
+            <span className="text-[10px] font-bold text-emerald-900 uppercase tracking-wider block">
+              Estimativa Anual (Run-Rate)
+            </span>
+            <div className="text-base font-bold font-mono tabular-nums text-emerald-600">
+              {formatBRL(annualRunRateSaving)} <span className="text-xs font-normal text-slate-500">/ano</span>
+            </div>
+            <span className="text-[10px] font-medium text-emerald-800/80 block">
+              {annualProgressPercent.toFixed(1)}% da Meta Anual ({formatBRL(annualTarget)})
+            </span>
           </div>
         </div>
 
@@ -299,6 +390,31 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
               );
             })}
 
+            {/* Ideal Target Pace Line (Amber dashed line #D97706) */}
+            {idealTargetPoints.length > 1 && (
+              <polyline
+                fill="none"
+                stroke="#D97706"
+                strokeWidth="2"
+                strokeDasharray="4 4"
+                points={idealTargetPolyline}
+              />
+            )}
+
+            {/* Ideal Target Markers */}
+            {idealTargetPoints.map((pt, idx) => (
+              <g key={`ideal-pt-${idx}`} className="pointer-events-none">
+                <circle
+                  cx={pt.x}
+                  cy={pt.y}
+                  r="3.5"
+                  fill="#D97706"
+                  stroke="#FFFFFF"
+                  strokeWidth="1.5"
+                />
+              </g>
+            ))}
+
             {/* Cumulative Saving Line (Royal Blue #2563EB - completely eliminates green-on-green collision) */}
             {cumulativePoints.length > 1 && (
               <polyline
@@ -412,6 +528,33 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
                 <span className="text-slate-500 block text-[11px]">Custo Médio / Passageiro:</span>
                 <span className="font-mono tabular-nums font-bold text-emerald-700">
                   {formatBRL(activeRecord.avgUberPerPassenger)}
+                </span>
+              </div>
+            </div>
+
+            {/* Comparativo do Dia com a Meta Estipulada */}
+            <div className="mt-3 pt-2.5 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2 bg-white/70 -mx-1 px-3 py-1.5 rounded">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Target className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <span className="text-slate-600 text-[11px]">
+                  Meta Diária Ideal: <strong className="font-mono text-slate-800">{formatBRL(monthlyTarget / daysInMonth)}/dia</strong>
+                </span>
+                <span className="text-slate-300">·</span>
+                <span className="text-slate-600 text-[11px]">
+                  Atingimento no Dia: <strong className={`font-mono ${activeRecord.saving >= (monthlyTarget / daysInMonth) ? 'text-emerald-700' : 'text-amber-700'}`}>
+                    {((activeRecord.saving / (monthlyTarget / daysInMonth)) * 100).toFixed(1)}%
+                  </strong>
+                </span>
+              </div>
+              <div>
+                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10.5px] font-semibold font-mono ${
+                  activeRecord.saving >= (monthlyTarget / daysInMonth) 
+                    ? 'bg-emerald-100 text-emerald-800' 
+                    : 'bg-amber-100 text-amber-800'
+                }`}>
+                  {activeRecord.saving >= (monthlyTarget / daysInMonth)
+                    ? `+${formatBRL(activeRecord.saving - (monthlyTarget / daysInMonth))} acima da meta diária`
+                    : `${formatBRL(activeRecord.saving - (monthlyTarget / daysInMonth))} abaixo da meta diária`}
                 </span>
               </div>
             </div>

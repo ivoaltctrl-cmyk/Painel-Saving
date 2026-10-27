@@ -238,7 +238,7 @@ export default function App() {
             {/* Quick Chart Strip Below the Resumo Tables */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               <div className="lg:col-span-8">
-                <DailySavingChart dailyRecords={dailyRecords} allTrips={periodTrips} />
+                <DailySavingChart dailyRecords={dailyRecords} allTrips={periodTrips} targetConfig={targetConfig} />
               </div>
               <div className="lg:col-span-4 space-y-4">
                 <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-xs">
@@ -275,7 +275,7 @@ export default function App() {
         {/* Tab 2: Evolução Diária */}
         {activeTab === 'evolucao' && (
           <div className="space-y-6">
-            <DailySavingChart dailyRecords={dailyRecords} allTrips={periodTrips} />
+            <DailySavingChart dailyRecords={dailyRecords} allTrips={periodTrips} targetConfig={targetConfig} />
           </div>
         )}
 

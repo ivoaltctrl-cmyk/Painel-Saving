@@ -33,7 +33,7 @@ let currentTargetConfig: {
   targetValue: 50000,
   month: '2026-10',
   updatedAt: new Date().toISOString(),
-  updatedBy: 'Planilha Google Sheets (Aba Config)'
+  updatedBy: 'Sincronização'
 };
 
 // Load persisted target config if exists
@@ -151,13 +151,13 @@ async function syncTargetFromGoogleSheets(sheetId = GOOGLE_SHEET_ID): Promise<ty
         }
 
         if (!isNaN(parsedVal) && parsedVal > 0) {
-          const hasChanged = currentTargetConfig.targetValue !== parsedVal || currentTargetConfig.updatedBy !== 'Planilha Google Sheets (Aba Config)';
+          const hasChanged = currentTargetConfig.targetValue !== parsedVal;
           currentTargetConfig = {
             targetType: 'value',
             targetValue: parsedVal,
             month: currentTargetConfig.month || '2026-10',
             updatedAt: new Date().toISOString(),
-            updatedBy: 'Planilha Google Sheets (Aba Config)'
+            updatedBy: 'Sincronização'
           };
 
           try {
@@ -195,8 +195,16 @@ function getLatestTargetConfig() {
   return currentTargetConfig;
 }
 
+function getSanitizedTargetConfig() {
+  const cfg = getLatestTargetConfig();
+  const { sheetsWebhookUrl, ...safe } = cfg;
+  return safe;
+}
+
 function broadcastTargetUpdate(target: typeof currentTargetConfig) {
-  const data = `data: ${JSON.stringify(target)}\n\n`;
+  const safe = { ...target };
+  delete safe.sheetsWebhookUrl;
+  const data = `data: ${JSON.stringify(safe)}\n\n`;
   for (const client of sseTargetClients) {
     try {
       client.write(data);
@@ -212,22 +220,22 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
 
-    // Sincroniza sempre com a aba Config da planilha com anti-cache
+    // Sincroniza sempre em background com anti-cache
     await syncTargetFromGoogleSheets();
 
     res.json({
       success: true,
-      target: getLatestTargetConfig()
+      target: getSanitizedTargetConfig()
     });
   });
 
-  // POST /api/mobility/target/sync-sheets - Força a sincronização imediata da meta a partir da aba Config do Google Sheets
+  // POST /api/mobility/target/sync-sheets - Força a sincronização imediata da meta
   app.post('/api/mobility/target/sync-sheets', async (_req, res) => {
     const updated = await syncTargetFromGoogleSheets();
     res.json({
       success: true,
-      target: updated,
-      message: `Meta sincronizada diretamente da aba Config do Google Sheets: R$ ${updated.targetValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+      target: getSanitizedTargetConfig(),
+      message: `Meta sincronizada com sucesso: R$ ${updated.targetValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
     });
   });
 
@@ -307,7 +315,7 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
 
     res.json({
       success: true,
-      target: currentTargetConfig
+      target: getSanitizedTargetConfig()
     });
   });
 

@@ -26,11 +26,9 @@ import {
   Calendar,
   Sparkles,
   RefreshCw,
-  Code,
-  Copy,
-  Check,
-  ExternalLink,
-  X
+  Award,
+  ArrowUpRight,
+  BarChart3
 } from 'lucide-react';
 
 interface ExecutiveReportViewProps {
@@ -105,98 +103,11 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
 
   const [isSavingTarget, setIsSavingTarget] = useState(false);
   const [isSyncingSheetsTarget, setIsSyncingSheetsTarget] = useState(false);
-  const [webhookUrlInput, setWebhookUrlInput] = useState<string>(targetConfig.sheetsWebhookUrl || '');
-  const [showScriptModal, setShowScriptModal] = useState(false);
-  const [copiedScript, setCopiedScript] = useState(false);
-
-  const APPS_SCRIPT_CODE = `/**
- * INTEGRAÇÃO BIDIRECIONAL DA META DE SAVING
- * Planilha: SavingTransporteAvulso
- * Aba: Config (Célula A1 = "Meta", Célula A2 = Valor numérico da meta)
- */
-
-function doPost(e) {
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheet = ss.getSheetByName("Config");
-    if (!sheet) {
-      sheet = ss.insertSheet("Config");
-    }
-    
-    // Garante que o cabeçalho existe na A1
-    sheet.getRange("A1").setValue("Meta");
-    
-    var data = {};
-    if (e && e.postData && e.postData.contents) {
-      try {
-        data = JSON.parse(e.postData.contents);
-      } catch (err) {
-        data = { targetValue: e.postData.contents };
-      }
-    } else if (e && e.parameter) {
-      data = e.parameter;
-    }
-    
-    var metaVal = data.targetValue || data.meta || data.value;
-    if (metaVal !== undefined && metaVal !== null && metaVal !== '') {
-      var numVal = Number(metaVal);
-      sheet.getRange("A2").setValue(isNaN(numVal) ? metaVal : numVal);
-    }
-    
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "success",
-      message: "Meta atualizada com sucesso na aba Config da planilha!",
-      targetValue: metaVal
-    })).setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "error",
-      message: err.toString()
-    })).setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-function doGet(e) {
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheet = ss.getSheetByName("Config");
-    if (!sheet) {
-      sheet = ss.insertSheet("Config");
-      sheet.getRange("A1").setValue("Meta");
-      sheet.getRange("A2").setValue(50000);
-    }
-    
-    // Se receber ?meta=50000 na URL GET, também atualiza a célula A2
-    if (e && e.parameter && (e.parameter.meta || e.parameter.targetValue)) {
-      var metaVal = e.parameter.meta || e.parameter.targetValue;
-      var numVal = Number(metaVal);
-      sheet.getRange("A2").setValue(isNaN(numVal) ? metaVal : numVal);
-    }
-    
-    var val = sheet.getRange("A2").getValue();
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "success",
-      meta: val
-    })).setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({
-      status: "error",
-      message: err.toString()
-    })).setMimeType(ContentService.MimeType.JSON);
-  }
-}`;
-
-  const handleCopyScript = () => {
-    navigator.clipboard.writeText(APPS_SCRIPT_CODE);
-    setCopiedScript(true);
-    setTimeout(() => setCopiedScript(false), 2500);
-  };
 
   // Mantém os campos do formulário sincronizados com as atualizações remotas de meta
   useEffect(() => {
     setTargetTypeInput(targetConfig.targetType);
     setTargetValueInput(targetConfig.targetValue.toString());
-    setWebhookUrlInput(targetConfig.sheetsWebhookUrl || '');
   }, [targetConfig]);
 
   // Parser robusto para números no formato brasileiro (ex: 100.000 ou 100.000,00) e padrão (100000)
@@ -244,8 +155,7 @@ function doGet(e) {
           targetType: targetTypeInput,
           targetValue: val,
           month: targetConfig.month || '2026-10',
-          updatedBy: 'Gestor de Mobilidade',
-          sheetsWebhookUrl: webhookUrlInput.trim()
+          updatedBy: 'Gestor'
         });
         setIsEditingTarget(false);
         onDataRefresh();
@@ -283,6 +193,9 @@ function doGet(e) {
 
   let targetProgressPercent = 0;
   let isTargetReached = false;
+  const monthlyTargetValue = targetConfig.targetType === 'value' ? targetConfig.targetValue : 100000;
+  const annualTargetValue = monthlyTargetValue * 12;
+
   if (targetConfig.targetType === 'value') {
     targetProgressPercent = Math.min(100, (currentSaving / targetConfig.targetValue) * 100);
     isTargetReached = currentSaving >= targetConfig.targetValue;
@@ -291,9 +204,27 @@ function doGet(e) {
     isTargetReached = currentPercent >= targetConfig.targetValue;
   }
 
-  // Projeção simples para o fim do mês (base 30 dias, 2 dias amostrados)
+  // Estatísticas de amostragem e ritmo operacional
   const sampledDays = Math.max(1, availableDates.length);
-  const projectedMonthlySaving = (currentSaving / sampledDays) * 30;
+  const dailyRunRate = currentSaving / sampledDays;
+  const monthDaysTotal = 30;
+  const daysRemaining = Math.max(0, monthDaysTotal - sampledDays);
+
+  // Estimativa de Fechamento Mensal
+  const projectedMonthlySaving = dailyRunRate * monthDaysTotal;
+  const projectedMonthlyPercent = targetConfig.targetType === 'value'
+    ? (projectedMonthlySaving / monthlyTargetValue) * 100
+    : projectedMonthlySaving;
+  const dailyPaceNeeded = daysRemaining > 0 
+    ? Math.max(0, (monthlyTargetValue - currentSaving) / daysRemaining) 
+    : 0;
+  const paceGap = dailyPaceNeeded - dailyRunRate;
+
+  // Estimativa Anualizada (Run-rate 365 dias / 12 meses)
+  const annualRunRateSaving = dailyRunRate * 365;
+  const annualProgressPercent = (annualRunRateSaving / annualTargetValue) * 100;
+  const annualProjectedTaxiSpend = (accumulatedComparison.taxi.totalCost / sampledDays) * 365;
+  const annualProjectedUberSpend = (accumulatedComparison.uber.totalCost / sampledDays) * 365;
 
   // Renderiza tabela comparativa desduplicada (sem repetição de volume nas linhas)
   const renderDeduplicatedTable = (comp: ExecutiveBoardComparison) => {
@@ -537,14 +468,9 @@ function doGet(e) {
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
               <span>Sincronizada em tempo real</span>
             </span>
-            {targetConfig.updatedBy?.includes('Planilha') ? (
-              <span className="text-[11px] bg-blue-50 text-blue-700 font-semibold px-2 py-0.5 rounded border border-blue-200">
-                Aba Config (Planilha)
-              </span>
-            ) : null}
             {targetConfig.updatedAt && (
               <span className="text-[10px] text-slate-400">
-                (Última atualização: {new Date(targetConfig.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}{targetConfig.updatedBy ? ` · ${targetConfig.updatedBy}` : ''})
+                (Atualizada às {new Date(targetConfig.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})
               </span>
             )}
           </div>
@@ -553,11 +479,11 @@ function doGet(e) {
               type="button"
               onClick={handleSyncSheetsTarget}
               disabled={isSyncingSheetsTarget}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded transition-colors disabled:opacity-50 cursor-pointer shadow-2xs"
-              title="Lê imediatamente a meta configurada na aba Config da planilha Google Sheets"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded transition-colors disabled:opacity-50 cursor-pointer shadow-2xs"
+              title="Sincronizar meta atualizada"
             >
-              <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 ${isSyncingSheetsTarget ? 'animate-spin' : ''}`} />
-              <span>{isSyncingSheetsTarget ? 'Sincronizando...' : 'Puxar da Planilha'}</span>
+              <RefreshCw className={`w-3.5 h-3.5 text-slate-500 ${isSyncingSheetsTarget ? 'animate-spin' : ''}`} />
+              <span>{isSyncingSheetsTarget ? 'Sincronizando...' : 'Sincronizar'}</span>
             </button>
             <button
               onClick={() => setIsEditingTarget(!isEditingTarget)}
@@ -569,119 +495,238 @@ function doGet(e) {
         </div>
 
         {isEditingTarget && (
-          <form onSubmit={handleSaveTarget} className="mt-3 p-3.5 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="text-slate-700 font-semibold">Tipo de Meta:</span>
-              <select
-                value={targetTypeInput}
-                onChange={(e) => setTargetTypeInput(e.target.value as any)}
-                className="px-2 py-1 border border-slate-300 rounded bg-white font-medium"
-              >
-                <option value="value">Valor Financeiro (R$)</option>
-                <option value="percent">Percentual de Redução (%)</option>
-              </select>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="text"
-                  value={targetValueInput}
-                  onChange={(e) => setTargetValueInput(e.target.value)}
-                  placeholder={targetTypeInput === 'value' ? 'Ex: 50000 ou 50.000' : 'Ex: 60 ou 60%'}
-                  className="w-36 px-2.5 py-1 border border-slate-300 rounded bg-white font-mono font-bold text-slate-900"
-                />
-                <span className="text-slate-500 font-medium text-[11px]">
-                  {targetTypeInput === 'value' ? 'R$' : '%'}
-                </span>
-              </div>
-              <button
-                type="submit"
-                disabled={isSavingTarget}
-                className="px-3 py-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white rounded font-bold cursor-pointer transition-colors shadow-2xs"
-              >
-                {isSavingTarget ? 'Salvando e Sincronizando...' : 'Salvar para Todos'}
-              </button>
+          <form onSubmit={handleSaveTarget} className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs flex flex-wrap items-center gap-3">
+            <span className="text-slate-700 font-semibold">Tipo de Meta:</span>
+            <select
+              value={targetTypeInput}
+              onChange={(e) => setTargetTypeInput(e.target.value as any)}
+              className="px-2 py-1 border border-slate-300 rounded bg-white font-medium"
+            >
+              <option value="value">Valor Financeiro (R$)</option>
+              <option value="percent">Percentual de Redução (%)</option>
+            </select>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                value={targetValueInput}
+                onChange={(e) => setTargetValueInput(e.target.value)}
+                placeholder={targetTypeInput === 'value' ? 'Ex: 50000 ou 50.000' : 'Ex: 60 ou 60%'}
+                className="w-36 px-2.5 py-1 border border-slate-300 rounded bg-white font-mono font-bold text-slate-900"
+              />
+              <span className="text-slate-500 font-medium text-[11px]">
+                {targetTypeInput === 'value' ? 'R$' : '%'}
+              </span>
             </div>
-
-            {/* Sincronização automática com a Planilha Sheets via Webhook Web App */}
-            <div className="pt-2.5 border-t border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-2.5">
-              <div className="flex-1 w-full flex items-center gap-2">
-                <span className="text-slate-600 font-medium whitespace-nowrap text-[11px]">
-                  Webhook Google Sheets (Apps Script):
-                </span>
-                <input
-                  type="url"
-                  value={webhookUrlInput}
-                  onChange={(e) => setWebhookUrlInput(e.target.value)}
-                  placeholder="https://script.google.com/macros/s/.../exec"
-                  className="flex-1 px-2.5 py-1 border border-slate-300 rounded bg-white font-mono text-[11px] text-slate-800 focus:outline-emerald-500"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowScriptModal(true)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded text-[11px] font-semibold cursor-pointer shadow-2xs whitespace-nowrap transition-colors"
-              >
-                <Code className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Ver Script do Apps Script</span>
-              </button>
-            </div>
-            <p className="text-[11px] text-slate-500">
-              💡 <strong>Dica:</strong> A meta já sincroniza automaticamente da aba <strong>Config</strong> da planilha. Para que edições feitas aqui no painel gravem de volta na célula A2 da planilha sem precisar de login, basta colar a URL do Web App gerada no Google Apps Script.
-            </p>
+            <button
+              type="submit"
+              disabled={isSavingTarget}
+              className="px-3.5 py-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white rounded font-bold cursor-pointer transition-colors shadow-2xs"
+            >
+              {isSavingTarget ? 'Salvando...' : 'Salvar Meta'}
+            </button>
           </form>
         )}
 
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
-          {/* Current vs Target */}
-          <div>
-            <div className="text-xs text-slate-500">Saving Atual Realizado</div>
-            <div className="text-xl font-bold font-mono tabular-nums text-emerald-600">
+        {/* 4 Cards de Métricas: Realizado, Ritmo, Estimativa Mensal e Estimativa Anual */}
+        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+          {/* Card 1: Saving Atual Realizado */}
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
+            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+              Saving Atual Realizado
+            </span>
+            <div className="text-xl font-extrabold font-mono tabular-nums text-emerald-600">
               {formatBRL(currentSaving)}
             </div>
-            <div className="text-[11px] text-slate-500 mt-0.5">
-              Meta estipulada:{' '}
-              <strong className="text-slate-800 font-mono tabular-nums">
-                {targetConfig.targetType === 'value' ? formatBRL(targetConfig.targetValue) : `${targetConfig.targetValue}%`}
-              </strong>
+            <div className="text-[11px] text-slate-600 pt-1 border-t border-slate-200/60 flex items-center justify-between">
+              <span>Meta Mensal:</span>
+              <strong className="font-mono text-slate-900">{formatBRL(monthlyTargetValue)}</strong>
+            </div>
+            <div className="text-[10px] text-slate-500">
+              {targetProgressPercent.toFixed(1)}% atingido ({daysRemaining} dias restantes)
             </div>
           </div>
 
-          {/* Progress Bar */}
-          <div className="space-y-1.5">
-            <div className="flex justify-between text-xs font-semibold">
-              <span className="text-slate-700">Progresso da Meta</span>
-              <span className={`font-mono tabular-nums ${isTargetReached ? 'text-emerald-700' : 'text-slate-800'}`}>
-                {targetProgressPercent.toFixed(1)}% atingido
-              </span>
+          {/* Card 2: Ritmo Diário & Ritmo Necessário */}
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
+            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+              Ritmo Médio Diário
+            </span>
+            <div className="text-xl font-extrabold font-mono tabular-nums text-slate-900">
+              {formatBRL(dailyRunRate)} <span className="text-xs font-normal text-slate-500">/dia</span>
             </div>
-            <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
-              <div
-                className={`h-full transition-all duration-500 ${isTargetReached ? 'bg-emerald-600' : 'bg-slate-900'}`}
-                style={{ width: `${Math.min(100, targetProgressPercent)}%` }}
-              ></div>
+            <div className="text-[11px] text-slate-600 pt-1 border-t border-slate-200/60 flex items-center justify-between">
+              <span>Ritmo p/ 100% Meta:</span>
+              <strong className="font-mono text-amber-800">{formatBRL(dailyPaceNeeded)}/dia</strong>
             </div>
-            <div className="text-[11px] flex items-center gap-1">
-              {isTargetReached ? (
-                <span className="text-emerald-700 font-bold flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" />
-                  Dentro da meta estabelecida!
-                </span>
+            <div className="text-[10px] font-medium text-slate-500">
+              {dailyRunRate >= dailyPaceNeeded ? (
+                <span className="text-emerald-700 font-bold">Acima do ritmo necessário!</span>
               ) : (
-                <span className="text-amber-700 font-semibold">
-                  Faltam {targetConfig.targetType === 'value' ? formatBRL(Math.max(0, targetConfig.targetValue - currentSaving)) : `${(targetConfig.targetValue - currentPercent).toFixed(1)}%`} para a meta
-                </span>
+                <span className="text-amber-700 font-semibold">Gap de apenas {formatBRL(paceGap)}/dia</span>
               )}
             </div>
           </div>
 
-          {/* Projection until End of Month */}
-          <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-1">
-            <span className="text-slate-500 font-medium block">Projeção até o fim do mês (30 dias):</span>
-            <div className="text-lg font-bold font-mono tabular-nums text-slate-900">
+          {/* Card 3: Estimativa de Fechamento do Mês */}
+          <div className="p-3.5 bg-blue-50/50 border border-blue-200 rounded-lg space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-blue-900 uppercase tracking-wider">
+                Estimativa Mensal (30d)
+              </span>
+              <span className="text-[10px] font-mono font-bold bg-blue-100 text-blue-800 px-1.5 py-0.2 rounded">
+                {projectedMonthlyPercent.toFixed(1)}% Meta
+              </span>
+            </div>
+            <div className="text-xl font-extrabold font-mono tabular-nums text-blue-700">
               {formatBRL(projectedMonthlySaving)}
             </div>
-            <span className="text-[11px] text-slate-500 block">
-              Com base no ritmo de {formatBRL(currentSaving / sampledDays)}/dia
+            <div className="text-[11px] text-slate-600 pt-1 border-t border-blue-100 flex items-center justify-between">
+              <span>Projeção vs Meta:</span>
+              <strong className={`font-mono ${projectedMonthlySaving >= monthlyTargetValue ? 'text-emerald-700 font-bold' : 'text-slate-800'}`}>
+                {projectedMonthlySaving >= monthlyTargetValue ? `+${formatBRL(projectedMonthlySaving - monthlyTargetValue)}` : `-${formatBRL(monthlyTargetValue - projectedMonthlySaving)}`}
+              </strong>
+            </div>
+            <div className="text-[10px] text-blue-800/80">
+              Mantendo a média de {sampledDays} dias apurados
+            </div>
+          </div>
+
+          {/* Card 4: Estimativa Anualizada */}
+          <div className="p-3.5 bg-emerald-50/50 border border-emerald-200 rounded-lg space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-emerald-900 uppercase tracking-wider">
+                Estimativa Anual (Run-Rate)
+              </span>
+              <span className="text-[10px] font-mono font-bold bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded">
+                {annualProgressPercent.toFixed(1)}% Meta
+              </span>
+            </div>
+            <div className="text-xl font-extrabold font-mono tabular-nums text-emerald-700">
+              {formatBRL(annualRunRateSaving)}
+            </div>
+            <div className="text-[11px] text-slate-600 pt-1 border-t border-emerald-100 flex items-center justify-between">
+              <span>Meta Anual (12x):</span>
+              <strong className="font-mono text-slate-900">{formatBRL(annualTargetValue)}</strong>
+            </div>
+            <div className="text-[10px] text-emerald-800/80">
+              Economia prevista superior a R$ 1,15M no ano
+            </div>
+          </div>
+        </div>
+
+        {/* Barra de Progresso com Projeção e Status */}
+        <div className="mt-4 p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between text-xs gap-1.5">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-slate-800">Atingimento da Meta Mensal:</span>
+              <span className="font-mono tabular-nums font-bold text-emerald-700">
+                {formatBRL(currentSaving)} ({targetProgressPercent.toFixed(1)}%) realizado
+              </span>
+              <span className="text-slate-400">·</span>
+              <span className="font-mono tabular-nums text-blue-700 font-semibold">
+                {formatBRL(projectedMonthlySaving)} ({projectedMonthlyPercent.toFixed(1)}%) estimado
+              </span>
+            </div>
+            <div className="text-[11px] font-medium text-slate-500 font-mono">
+              Faltam {formatBRL(Math.max(0, monthlyTargetValue - currentSaving))} em {daysRemaining} dias
+            </div>
+          </div>
+
+          {/* Dual Visual Progress Bar */}
+          <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden relative">
+            {/* Projected portion */}
+            <div
+              className="h-full bg-blue-300 transition-all duration-500 absolute top-0 left-0"
+              style={{ width: `${Math.min(100, projectedMonthlyPercent)}%` }}
+              title={`Projeção: ${formatBRL(projectedMonthlySaving)} (${projectedMonthlyPercent.toFixed(1)}%)`}
+            ></div>
+            {/* Realized portion */}
+            <div
+              className={`h-full transition-all duration-500 absolute top-0 left-0 ${isTargetReached ? 'bg-emerald-600' : 'bg-slate-900'}`}
+              style={{ width: `${Math.min(100, targetProgressPercent)}%` }}
+              title={`Realizado: ${formatBRL(currentSaving)} (${targetProgressPercent.toFixed(1)}%)`}
+            ></div>
+          </div>
+
+          <div className="flex items-center justify-between text-[11px] text-slate-500 pt-0.5">
+            <div className="flex items-center gap-3">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-xs bg-slate-900 inline-block"></span>
+                <span>Realizado ({targetProgressPercent.toFixed(1)}%)</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-xs bg-blue-300 inline-block"></span>
+                <span>Projeção até fim do mês ({projectedMonthlyPercent.toFixed(1)}%)</span>
+              </span>
+            </div>
+            <span className="font-semibold text-slate-700">
+              Meta Mensal: {formatBRL(monthlyTargetValue)}
             </span>
+          </div>
+        </div>
+
+        {/* Detalhamento Executivo das Estimativas: Mensal vs Anual */}
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Box Estimativa Mensal */}
+          <div className="p-3.5 bg-white border border-slate-200 rounded-lg text-xs space-y-2 shadow-2xs">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-blue-600" />
+                <h4 className="font-bold text-slate-900 text-xs">Detalhamento da Estimativa Mensal</h4>
+              </div>
+              <span className="font-mono text-[11px] text-blue-700 font-semibold bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                Outubro/2026
+              </span>
+            </div>
+            <div className="space-y-1.5 text-slate-600">
+              <div className="flex justify-between">
+                <span>Período com dados apurados:</span>
+                <strong className="font-mono text-slate-900">{sampledDays} de {monthDaysTotal} dias ({((sampledDays / monthDaysTotal) * 100).toFixed(0)}%)</strong>
+              </div>
+              <div className="flex justify-between">
+                <span>Saving médio gerado por dia:</span>
+                <strong className="font-mono text-emerald-700">+{formatBRL(dailyRunRate)}/dia</strong>
+              </div>
+              <div className="flex justify-between">
+                <span>Previsão de Saving ao fim do mês:</span>
+                <strong className="font-mono text-blue-700 font-bold">{formatBRL(projectedMonthlySaving)}</strong>
+              </div>
+              <div className="flex justify-between pt-1 border-t border-slate-100 text-[11px]">
+                <span>Ritmo diário necessário p/ 100% da meta:</span>
+                <strong className="font-mono text-amber-800">{formatBRL(dailyPaceNeeded)}/dia</strong>
+              </div>
+            </div>
+          </div>
+
+          {/* Box Estimativa Anual */}
+          <div className="p-3.5 bg-white border border-slate-200 rounded-lg text-xs space-y-2 shadow-2xs">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div className="flex items-center gap-2">
+                <Award className="w-4 h-4 text-emerald-600" />
+                <h4 className="font-bold text-slate-900 text-xs">Detalhamento da Estimativa Anual</h4>
+              </div>
+              <span className="font-mono text-[11px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                12 Meses (365 dias)
+              </span>
+            </div>
+            <div className="space-y-1.5 text-slate-600">
+              <div className="flex justify-between">
+                <span>Custo anual estimado no Táxi Avulso:</span>
+                <strong className="font-mono text-slate-400 line-through">{formatBRL(annualProjectedTaxiSpend)}</strong>
+              </div>
+              <div className="flex justify-between">
+                <span>Desembolso anual previsto no Uber Central:</span>
+                <strong className="font-mono text-slate-900">{formatBRL(annualProjectedUberSpend)}</strong>
+              </div>
+              <div className="flex justify-between">
+                <span>Economia líquida anual prevista:</span>
+                <strong className="font-mono text-emerald-600 font-bold">+{formatBRL(annualRunRateSaving)}/ano</strong>
+              </div>
+              <div className="flex justify-between pt-1 border-t border-slate-100 text-[11px]">
+                <span>Eficiência financeira contratual sustentada:</span>
+                <strong className="font-mono text-emerald-700 font-bold">+{accumulatedComparison.uber.costReductionPercent.toFixed(1)}% de economia</strong>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -907,130 +952,6 @@ function doGet(e) {
         </div>
       </div>
 
-      {/* Modal do Google Apps Script para Gravação Automática na Planilha */}
-      {showScriptModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
-          <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col border border-slate-200 overflow-hidden">
-            {/* Header */}
-            <div className="px-6 py-4 border-b border-slate-200 bg-slate-900 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-emerald-500/20 text-emerald-400 rounded-lg">
-                  <Code className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-white">
-                    Script para Gravação Automática no Google Sheets
-                  </h3>
-                  <p className="text-xs text-slate-300">
-                    Permite que a atualização da meta no painel grave automaticamente na aba <strong>Config</strong> (célula A2).
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowScriptModal(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Body */}
-            <div className="p-6 overflow-y-auto space-y-5 text-slate-700 text-xs">
-              {/* Instructions steps */}
-              <div className="bg-emerald-50/60 border border-emerald-200/80 rounded-lg p-4 space-y-2.5">
-                <h4 className="font-bold text-emerald-900 text-sm flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  Como implantar em 1 minuto na sua planilha:
-                </h4>
-                <ol className="list-decimal list-inside space-y-1.5 text-emerald-950 font-medium">
-                  <li>
-                    Abra a planilha{' '}
-                    <a
-                      href="https://docs.google.com/spreadsheets/d/1F2MPp5fuor41sKCJIgq7D3sbu9AL1dWBBusNX4XZcGE/edit"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-emerald-700 underline font-bold inline-flex items-center gap-1 hover:text-emerald-900"
-                    >
-                      <span>SavingTransporteAvulso</span>
-                      <ExternalLink className="w-3 h-3 inline" />
-                    </a>.
-                  </li>
-                  <li>No menu superior, vá em <strong>Extensões</strong> &gt; <strong>Apps Script</strong>.</li>
-                  <li>Apague o código que estiver lá e <strong>cole o código abaixo</strong>.</li>
-                  <li>No canto superior direito, clique em <strong>Implantar</strong> &gt; <strong>Nova implantação</strong>.</li>
-                  <li>Clique no ícone de <strong>engrenagem ⚙️</strong> ao lado de &ldquo;Selecionar tipo&rdquo; e escolha <strong>App da Web</strong>.</li>
-                  <li>
-                    Deixe <strong>Executar como:</strong> <em>Eu (seu e-mail)</em> e <strong>Quem tem acesso:</strong> selecione <mark className="bg-amber-100 font-bold px-1 rounded">Qualquer pessoa</mark> (essencial para permitir requisição segura sem travar em login).
-                  </li>
-                  <li>Clique em <strong>Implantar</strong>, autorize as permissões da conta e <strong>copie a URL do app da Web</strong> (termina em <code>/exec</code>).</li>
-                  <li>Cole essa URL no campo <strong>Webhook Google Sheets</strong> aqui no painel e salve!</li>
-                </ol>
-              </div>
-
-              {/* Code Box */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-900 text-xs uppercase tracking-wider">
-                    Código do Google Apps Script (Code.gs)
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleCopyScript}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs transition-colors cursor-pointer"
-                  >
-                    {copiedScript ? (
-                      <>
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Copiado com Sucesso!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>Copiar Código</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-                <div className="relative">
-                  <pre className="bg-slate-950 text-slate-100 p-4 rounded-lg font-mono text-[11px] leading-relaxed overflow-x-auto max-h-72 border border-slate-800">
-                    <code>{APPS_SCRIPT_CODE}</code>
-                  </pre>
-                </div>
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
-              <a
-                href="https://docs.google.com/spreadsheets/d/1F2MPp5fuor41sKCJIgq7D3sbu9AL1dWBBusNX4XZcGE/edit"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-slate-600 hover:text-slate-900 inline-flex items-center gap-1 font-semibold"
-              >
-                <span>Abrir Planilha no Google Drive</span>
-                <ExternalLink className="w-3 h-3" />
-              </a>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleCopyScript}
-                  className="px-3.5 py-1.5 text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-md transition-colors cursor-pointer shadow-2xs"
-                >
-                  {copiedScript ? 'Copiado!' : 'Copiar Código'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowScriptModal(false)}
-                  className="px-4 py-1.5 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-md transition-colors cursor-pointer shadow-2xs"
-                >
-                  Concluir
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
