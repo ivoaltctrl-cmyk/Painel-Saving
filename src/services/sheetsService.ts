@@ -43,8 +43,9 @@ export const DEFAULT_AUDIT_LOGS: TariffAuditLog[] = [
 
 export const DEFAULT_SAVING_TARGET: SavingTargetConfig = {
   targetType: 'value',
-  targetValue: 50000,
+  targetValue: 100000,
   month: '2026-10',
+  updatedBy: 'Planilha Google Sheets (Aba Config)',
 };
 
 export class SheetsService {
@@ -327,14 +328,16 @@ export class SheetsService {
   }
 
   public static async syncTargetFromGoogleSheets(): Promise<SavingTargetConfig> {
-    // 1. Tenta via backend proxy (sem qualquer restrição de CORS e com anti-cache garantido)
+    // 1. Tenta sincronização forçada via endpoint POST /api/mobility/target/sync-sheets
     try {
-      const res = await fetch(`/api/mobility/target?refresh=true&_t=${Date.now()}`, {
+      const postRes = await fetch(`/api/mobility/target/sync-sheets?_t=${Date.now()}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         cache: 'no-store'
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.success && data.target && typeof data.target.targetValue === 'number') {
+      if (postRes.ok) {
+        const data = await postRes.json();
+        if (data && data.success && data.target && typeof data.target.targetValue === 'number' && data.target.targetValue > 0) {
           const remoteTarget: SavingTargetConfig = { ...DEFAULT_SAVING_TARGET, ...data.target };
           this.savingTarget = remoteTarget;
           try {
@@ -345,22 +348,80 @@ export class SheetsService {
         }
       }
     } catch (e) {
-      console.warn('[SheetsService] Falha ao sincronizar via backend proxy:', e);
+      console.warn('[SheetsService] Falha no POST sync-sheets, tentando GET...', e);
+    }
+
+    // 2. Tenta via GET /api/mobility/target
+    try {
+      const res = await fetch(`/api/mobility/target?refresh=true&_t=${Date.now()}`, {
+        cache: 'no-store'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success && data.target && typeof data.target.targetValue === 'number' && data.target.targetValue > 0) {
+          const remoteTarget: SavingTargetConfig = { ...DEFAULT_SAVING_TARGET, ...data.target };
+          this.savingTarget = remoteTarget;
+          try {
+            localStorage.setItem(LOCAL_STORAGE_SAVING_TARGET, JSON.stringify(this.savingTarget));
+          } catch {}
+          this.notifyTargetListeners(this.savingTarget);
+          return this.savingTarget;
+        }
+      }
+    } catch (e) {
+      console.warn('[SheetsService] Falha ao sincronizar via backend GET:', e);
+    }
+
+    // 3. Fallback direto da planilha online Google Sheets (aba Config)
+    try {
+      const directUrl = `https://docs.google.com/spreadsheets/d/1F2MPp5fuor41sKCJIgq7D3sbu9AL1dWBBusNX4XZcGE/gviz/tq?tqx=out:csv&sheet=Config&_t=${Date.now()}`;
+      const sheetRes = await fetch(directUrl, { cache: 'no-store' });
+      if (sheetRes.ok) {
+        const csv = await sheetRes.text();
+        const rawLines = csv.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        for (const line of rawLines) {
+          const cols = line.split(/[,;\t]/).map(c => c.replace(/^"|"$/g, '').trim());
+          for (const cell of cols) {
+            if (/meta/i.test(cell)) continue;
+            let clean = cell.replace(/[R$\s]/g, '');
+            if (clean.includes('.') && clean.includes(',')) clean = clean.replace(/\./g, '').replace(',', '.');
+            else if (clean.includes(',')) clean = clean.replace(',', '.');
+            const parsed = parseFloat(clean);
+            if (!isNaN(parsed) && parsed >= 100) {
+              const remoteTarget: SavingTargetConfig = {
+                targetType: 'value',
+                targetValue: parsed,
+                month: '2026-10',
+                updatedAt: new Date().toISOString(),
+                updatedBy: 'Planilha Google Sheets (Aba Config)'
+              };
+              this.savingTarget = remoteTarget;
+              try {
+                localStorage.setItem(LOCAL_STORAGE_SAVING_TARGET, JSON.stringify(this.savingTarget));
+              } catch {}
+              this.notifyTargetListeners(this.savingTarget);
+              return this.savingTarget;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[SheetsService] Falha no fallback direto do Google Sheets:', e);
     }
 
     return this.getSavingTarget();
   }
 
   public static getSavingTarget(): SavingTargetConfig {
-    if (this.savingTarget && this.savingTarget.targetValue > 0 && this.savingTarget.targetValue !== 6000) {
+    if (this.savingTarget && this.savingTarget.targetValue > 0 && this.savingTarget.targetValue !== 6000 && this.savingTarget.targetValue !== 50000) {
       return this.savingTarget;
     }
     try {
-      // Purga qualquer chave com o 6000 indesejado
+      // Purga qualquer chave com o 6000 ou 50000 indesejado
       const oldKeys = ['mobility_saving_target', 'mobility_saving_target_v4'];
       for (const k of oldKeys) {
         const val = localStorage.getItem(k);
-        if (val && val.includes('6000')) {
+        if (val && (val.includes('6000') || val.includes('50000'))) {
           localStorage.removeItem(k);
         }
       }
@@ -368,10 +429,10 @@ export class SheetsService {
       const stored = localStorage.getItem(LOCAL_STORAGE_SAVING_TARGET);
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (parsed && typeof parsed.targetValue === 'number' && parsed.targetValue > 0 && parsed.targetValue !== 6000) {
+        if (parsed && typeof parsed.targetValue === 'number' && parsed.targetValue > 0 && parsed.targetValue !== 6000 && parsed.targetValue !== 50000) {
           this.savingTarget = { ...DEFAULT_SAVING_TARGET, ...parsed };
           return this.savingTarget;
-        } else if (parsed && parsed.targetValue === 6000) {
+        } else if (parsed && (parsed.targetValue === 6000 || parsed.targetValue === 50000)) {
           localStorage.removeItem(LOCAL_STORAGE_SAVING_TARGET);
         }
       }

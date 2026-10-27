@@ -165,11 +165,19 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
     }
   };
 
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+
   const handleSyncSheetsTarget = async () => {
     setIsSyncingSheetsTarget(true);
+    setSyncFeedback(null);
     try {
-      await SheetsService.syncTargetFromGoogleSheets();
+      const updated = await SheetsService.syncTargetFromGoogleSheets();
       onDataRefresh();
+      setSyncFeedback(`Meta de ${formatBRL(updated.targetValue)} puxada com sucesso diretamente da aba Config da planilha!`);
+      setTimeout(() => setSyncFeedback(null), 5000);
+    } catch {
+      setSyncFeedback('Falha ao conectar com a planilha Google Sheets.');
+      setTimeout(() => setSyncFeedback(null), 5000);
     } finally {
       setIsSyncingSheetsTarget(false);
     }
@@ -468,9 +476,12 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
               <span>Sincronizada em tempo real</span>
             </span>
+            <span className="text-[11px] bg-blue-50 text-blue-700 font-semibold px-2 py-0.5 rounded border border-blue-200">
+              Aba Config (Planilha)
+            </span>
             {targetConfig.updatedAt && (
-              <span className="text-[10px] text-slate-400">
-                (Atualizada às {new Date(targetConfig.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})
+              <span className="text-[10px] text-slate-500">
+                (Última atualização: {new Date(targetConfig.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} - Planilha Google Sheets (Aba Config))
               </span>
             )}
           </div>
@@ -479,11 +490,11 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
               type="button"
               onClick={handleSyncSheetsTarget}
               disabled={isSyncingSheetsTarget}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded transition-colors disabled:opacity-50 cursor-pointer shadow-2xs"
-              title="Sincronizar meta atualizada"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-md transition-colors disabled:opacity-50 cursor-pointer shadow-2xs"
+              title="Puxar meta atualizada diretamente da aba Config da planilha Google Sheets"
             >
-              <RefreshCw className={`w-3.5 h-3.5 text-slate-500 ${isSyncingSheetsTarget ? 'animate-spin' : ''}`} />
-              <span>{isSyncingSheetsTarget ? 'Sincronizando...' : 'Sincronizar'}</span>
+              <RefreshCw className={`w-3.5 h-3.5 text-emerald-700 ${isSyncingSheetsTarget ? 'animate-spin' : ''}`} />
+              <span>{isSyncingSheetsTarget ? 'Puxando da Planilha...' : 'Puxar da Planilha'}</span>
             </button>
             <button
               onClick={() => setIsEditingTarget(!isEditingTarget)}
@@ -493,6 +504,13 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
             </button>
           </div>
         </div>
+
+        {syncFeedback && (
+          <div className="mt-3 p-2.5 bg-emerald-50 border border-emerald-200 rounded-md text-xs text-emerald-800 flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="font-medium">{syncFeedback}</span>
+          </div>
+        )}
 
         {isEditingTarget && (
           <form onSubmit={handleSaveTarget} className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs flex flex-wrap items-center gap-3">

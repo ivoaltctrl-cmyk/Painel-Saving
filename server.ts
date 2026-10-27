@@ -30,10 +30,10 @@ let currentTargetConfig: {
   sheetsWebhookUrl?: string;
 } = {
   targetType: 'value',
-  targetValue: 50000,
+  targetValue: 100000,
   month: '2026-10',
   updatedAt: new Date().toISOString(),
-  updatedBy: 'Sincronização'
+  updatedBy: 'Planilha Google Sheets (Aba Config)'
 };
 
 // Load persisted target config if exists
@@ -135,41 +135,85 @@ async function syncTargetFromGoogleSheets(sheetId = GOOGLE_SHEET_ID): Promise<ty
 
     if (response.ok) {
       const csv = await response.text();
-      // Espera linhas no formato:
-      // "Meta"
-      // "50000"
-      const lines = csv.split('\n').map(l => l.trim().replace(/^"|"$/g, '')).filter(Boolean);
-      if (lines.length >= 2) {
-        let rawVal = lines[1].replace(/"/g, '').replace('R$', '').trim();
-        let parsedVal = NaN;
-        if (rawVal.includes('.') && rawVal.includes(',')) {
-          parsedVal = parseFloat(rawVal.replace(/\./g, '').replace(',', '.'));
-        } else if (rawVal.includes(',')) {
-          parsedVal = parseFloat(rawVal.replace(',', '.'));
-        } else {
-          parsedVal = parseFloat(rawVal);
+      const rawLines = csv.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      
+      const parseNum = (str: string): number | null => {
+        if (!str) return null;
+        let clean = str.replace(/"/g, '').replace(/[R$\s]/g, '').trim();
+        if (clean.includes('.') && clean.includes(',')) {
+          clean = clean.replace(/\./g, '').replace(',', '.');
+        } else if (clean.includes(',')) {
+          clean = clean.replace(',', '.');
+        }
+        const val = parseFloat(clean);
+        return !isNaN(val) && val > 0 ? val : null;
+      };
+
+      let parsedVal: number | null = null;
+
+      // 1. Procurar nas linhas próximas ao texto "meta"
+      for (let i = 0; i < rawLines.length; i++) {
+        const line = rawLines[i];
+        const cols = line.split(/[,;\t]/).map(c => c.replace(/^"|"$/g, '').trim());
+        
+        // Se a coluna 0 for "meta" e a coluna 1 tiver número
+        if (cols[0] && cols[0].toLowerCase().includes('meta') && cols.length > 1) {
+          const val = parseNum(cols[1]);
+          if (val) {
+            parsedVal = val;
+            break;
+          }
         }
 
-        if (!isNaN(parsedVal) && parsedVal > 0) {
-          const hasChanged = currentTargetConfig.targetValue !== parsedVal;
-          currentTargetConfig = {
-            targetType: 'value',
-            targetValue: parsedVal,
-            month: currentTargetConfig.month || '2026-10',
-            updatedAt: new Date().toISOString(),
-            updatedBy: 'Sincronização'
-          };
-
-          try {
-            fs.writeFileSync(TARGET_FILE, JSON.stringify(currentTargetConfig, null, 2), 'utf-8');
-            console.log('[Server] Meta sincronizada com sucesso da aba Config do Google Sheets:', parsedVal);
-          } catch (err) {
-            console.error('[Server] Erro ao gravar target-config.json:', err);
+        // Se a linha for "meta" e a próxima linha tiver o número
+        if (cols[0] && cols[0].toLowerCase().includes('meta') && i + 1 < rawLines.length) {
+          const nextCols = rawLines[i + 1].split(/[,;\t]/).map(c => c.replace(/^"|"$/g, '').trim());
+          for (const cell of nextCols) {
+            const val = parseNum(cell);
+            if (val) {
+              parsedVal = val;
+              break;
+            }
           }
+          if (parsedVal) break;
+        }
+      }
 
-          if (hasChanged) {
-            broadcastTargetUpdate(currentTargetConfig);
+      // 2. Se não achou adjacente, busca qualquer número positivo >= 100 na planilha de config
+      if (!parsedVal) {
+        for (const line of rawLines) {
+          const cols = line.split(/[,;\t]/).map(c => c.replace(/^"|"$/g, '').trim());
+          for (const cell of cols) {
+            if (/meta/i.test(cell)) continue;
+            const val = parseNum(cell);
+            if (val && val >= 100) {
+              parsedVal = val;
+              break;
+            }
           }
+          if (parsedVal) break;
+        }
+      }
+
+      if (parsedVal && parsedVal > 0) {
+        const hasChanged = currentTargetConfig.targetValue !== parsedVal;
+        currentTargetConfig = {
+          targetType: 'value',
+          targetValue: parsedVal,
+          month: currentTargetConfig.month || '2026-10',
+          updatedAt: new Date().toISOString(),
+          updatedBy: 'Planilha Google Sheets (Aba Config)'
+        };
+
+        try {
+          fs.writeFileSync(TARGET_FILE, JSON.stringify(currentTargetConfig, null, 2), 'utf-8');
+          console.log('[Server] Meta sincronizada com sucesso da aba Config do Google Sheets:', parsedVal);
+        } catch (err) {
+          console.error('[Server] Erro ao gravar target-config.json:', err);
+        }
+
+        if (hasChanged) {
+          broadcastTargetUpdate(currentTargetConfig);
         }
       }
     }
