@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
@@ -178,7 +179,7 @@ async function syncTripsFromGoogleSheets(sheetId = GOOGLE_SHEET_ID): Promise<str
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // Universal CORS Middleware for cross-device access (Mobile, Desktop, Dev, Shared App URLs)
   app.use((req, res, next) => {
