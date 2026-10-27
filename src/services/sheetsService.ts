@@ -309,10 +309,10 @@ export class SheetsService {
       }
     });
 
-    // 4. Polling periódico de segurança (a cada 3 segundos) com anti-cache
+    // 4. Polling periódico de segurança (a cada 20 segundos) com anti-cache
     setInterval(() => {
       this.fetchSavingTarget();
-    }, 3000);
+    }, 20000);
 
     // 5. Atualização imediata ao ganhar foco na janela/aba
     window.addEventListener('focus', () => {
@@ -328,7 +328,31 @@ export class SheetsService {
   }
 
   public static async syncTargetFromGoogleSheets(): Promise<SavingTargetConfig> {
-    // 1. Tenta sincronização forçada via endpoint POST /api/mobility/target/sync-sheets
+    // 1. Tenta via GET /api/mobility/target (rápido, sem sobrecarregar o Google Sheets)
+    try {
+      const res = await fetch(`/api/mobility/target?_t=${Date.now()}`, {
+        cache: 'no-store'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success && data.target && typeof data.target.targetValue === 'number' && data.target.targetValue > 0) {
+          const remoteTarget: SavingTargetConfig = { ...DEFAULT_SAVING_TARGET, ...data.target };
+          const hasChanged = !this.savingTarget || this.savingTarget.targetValue !== remoteTarget.targetValue;
+          this.savingTarget = remoteTarget;
+          try {
+            localStorage.setItem(LOCAL_STORAGE_SAVING_TARGET, JSON.stringify(this.savingTarget));
+          } catch {}
+          if (hasChanged) {
+            this.notifyTargetListeners(this.savingTarget);
+          }
+          return this.savingTarget;
+        }
+      }
+    } catch (e) {
+      console.warn('[SheetsService] Falha ao sincronizar via backend GET /target:', e);
+    }
+
+    // 2. Se falhar, tenta sincronização forçada via endpoint POST /api/mobility/target/sync-sheets
     try {
       const postRes = await fetch(`/api/mobility/target/sync-sheets?_t=${Date.now()}`, {
         method: 'POST',
@@ -348,92 +372,23 @@ export class SheetsService {
         }
       }
     } catch (e) {
-      console.warn('[SheetsService] Falha no POST sync-sheets, tentando GET...', e);
-    }
-
-    // 2. Tenta via GET /api/mobility/target
-    try {
-      const res = await fetch(`/api/mobility/target?refresh=true&_t=${Date.now()}`, {
-        cache: 'no-store'
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.success && data.target && typeof data.target.targetValue === 'number' && data.target.targetValue > 0) {
-          const remoteTarget: SavingTargetConfig = { ...DEFAULT_SAVING_TARGET, ...data.target };
-          this.savingTarget = remoteTarget;
-          try {
-            localStorage.setItem(LOCAL_STORAGE_SAVING_TARGET, JSON.stringify(this.savingTarget));
-          } catch {}
-          this.notifyTargetListeners(this.savingTarget);
-          return this.savingTarget;
-        }
-      }
-    } catch (e) {
-      console.warn('[SheetsService] Falha ao sincronizar via backend GET:', e);
-    }
-
-    // 3. Fallback direto da planilha online Google Sheets (aba Config)
-    try {
-      const directUrl = `https://docs.google.com/spreadsheets/d/1F2MPp5fuor41sKCJIgq7D3sbu9AL1dWBBusNX4XZcGE/gviz/tq?tqx=out:csv&sheet=Config&_t=${Date.now()}`;
-      const sheetRes = await fetch(directUrl, { cache: 'no-store' });
-      if (sheetRes.ok) {
-        const csv = await sheetRes.text();
-        const rawLines = csv.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-        for (const line of rawLines) {
-          const cols = line.split(/[,;\t]/).map(c => c.replace(/^"|"$/g, '').trim());
-          for (const cell of cols) {
-            if (/meta/i.test(cell)) continue;
-            let clean = cell.replace(/[R$\s]/g, '');
-            if (clean.includes('.') && clean.includes(',')) clean = clean.replace(/\./g, '').replace(',', '.');
-            else if (clean.includes(',')) clean = clean.replace(',', '.');
-            const parsed = parseFloat(clean);
-            if (!isNaN(parsed) && parsed >= 100) {
-              const remoteTarget: SavingTargetConfig = {
-                targetType: 'value',
-                targetValue: parsed,
-                month: '2026-10',
-                updatedAt: new Date().toISOString(),
-                updatedBy: 'Planilha Google Sheets (Aba Config)'
-              };
-              this.savingTarget = remoteTarget;
-              try {
-                localStorage.setItem(LOCAL_STORAGE_SAVING_TARGET, JSON.stringify(this.savingTarget));
-              } catch {}
-              this.notifyTargetListeners(this.savingTarget);
-              return this.savingTarget;
-            }
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('[SheetsService] Falha no fallback direto do Google Sheets:', e);
+      console.warn('[SheetsService] Falha no POST sync-sheets:', e);
     }
 
     return this.getSavingTarget();
   }
 
   public static getSavingTarget(): SavingTargetConfig {
-    if (this.savingTarget && this.savingTarget.targetValue > 0 && this.savingTarget.targetValue !== 6000 && this.savingTarget.targetValue !== 50000) {
+    if (this.savingTarget && this.savingTarget.targetValue > 0) {
       return this.savingTarget;
     }
     try {
-      // Purga qualquer chave com o 6000 ou 50000 indesejado
-      const oldKeys = ['mobility_saving_target', 'mobility_saving_target_v4'];
-      for (const k of oldKeys) {
-        const val = localStorage.getItem(k);
-        if (val && (val.includes('6000') || val.includes('50000'))) {
-          localStorage.removeItem(k);
-        }
-      }
-
       const stored = localStorage.getItem(LOCAL_STORAGE_SAVING_TARGET);
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (parsed && typeof parsed.targetValue === 'number' && parsed.targetValue > 0 && parsed.targetValue !== 6000 && parsed.targetValue !== 50000) {
+        if (parsed && typeof parsed.targetValue === 'number' && parsed.targetValue > 0) {
           this.savingTarget = { ...DEFAULT_SAVING_TARGET, ...parsed };
           return this.savingTarget;
-        } else if (parsed && (parsed.targetValue === 6000 || parsed.targetValue === 50000)) {
-          localStorage.removeItem(LOCAL_STORAGE_SAVING_TARGET);
         }
       }
     } catch {
@@ -611,26 +566,31 @@ export class SheetsService {
   }
 
   public static async loadInitialData(): Promise<UberCsvTripRecord[]> {
-    // Sincroniza a meta compartilhada com todos os usuários a partir do backend
-    await this.fetchSavingTarget();
+    // 1. Sincroniza a meta compartilhada com todos os usuários a partir do backend
+    try {
+      await this.fetchSavingTarget();
+    } catch (e) {
+      console.warn('[SheetsService] Erro ao sincronizar meta inicial:', e);
+    }
 
+    // 2. Tenta sempre carregar direto do backend / Google Sheets primeiro (garante base completa de 248 viagens em qualquer dispositivo)
+    try {
+      const syncRes = await this.syncFromGoogleSheets();
+      if (syncRes.success && this.trips.length > 0) {
+        return this.trips;
+      }
+    } catch (e) {
+      console.warn('[SheetsService] Sync online falhou no load inicial:', e);
+    }
+
+    // 3. Se já temos viagens salvas no cache local com o dia 23, usa
     const existing = this.getTrips();
     const hasDay23 = existing.some(t => t.requestDateLocal === '2026-10-23');
     if (existing.length >= 80 && hasDay23) {
       return existing;
     }
 
-    // Tenta primeiro carregar direto da planilha Google Sheets online oficial
-    try {
-      const syncRes = await this.syncFromGoogleSheets(this.config.sheetUrl);
-      if (syncRes.success && this.trips.length > 0) {
-        return this.trips;
-      }
-    } catch {
-      // continua para fallback
-    }
-
-    // Fallback: carrega CSV base e mescla o lote oficial do dia 23
+    // 4. Fallback: carrega CSV base e mescla o lote oficial do dia 23
     try {
       const response = await fetch('/assets/aistudio/SavingTransporteAvulso_-_Dados_Uber_fb6e558e.csv');
       if (response.ok) {
@@ -710,18 +670,21 @@ export class SheetsService {
             detectedTab = proxyData.detectedTab || 'Dados Uber';
           }
         }
-      } catch {
-        // proxy call failed
+      } catch (e) {
+        console.warn('[SheetsService] Falha na chamada do proxy /api/mobility/sheets-sync:', e);
       }
 
-      // 2. Se o proxy não retornou, tenta fetch direto
-      if (!csvContent) {
+      // 2. Se o proxy não retornou e temos uma URL válida que começa com http, tenta fetch direto
+      if (!csvContent && rawUrl && (rawUrl.startsWith('http://') || rawUrl.startsWith('https://'))) {
         const directUrl = this.normalizeGoogleSheetUrl(rawUrl);
         const directRes = await fetch(directUrl);
-        if (!directRes.ok) {
-          throw new Error(`Falha ao obter planilha: status HTTP ${directRes.status}. Verifique se a planilha tem permissão pública de visualização.`);
+        if (directRes.ok) {
+          csvContent = await directRes.text();
         }
-        csvContent = await directRes.text();
+      }
+
+      if (!csvContent) {
+        throw new Error('Não foi possível obter dados da planilha online.');
       }
 
       const importRes = this.importFromCsvText(csvContent, 'merge');

@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 // Persistence directory and file for shared settings
 const DATA_DIR = path.resolve(__dirname, 'data');
 const TARGET_FILE = path.resolve(DATA_DIR, 'target-config.json');
+const TRIPS_FILE = path.resolve(DATA_DIR, 'trips-cache.csv');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -17,6 +18,17 @@ if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   } catch (err) {
     console.warn('[Server] Could not create data directory:', err);
+  }
+}
+
+// In-memory cache for trips CSV
+let cachedTripsCsv = '';
+if (fs.existsSync(TRIPS_FILE)) {
+  try {
+    cachedTripsCsv = fs.readFileSync(TRIPS_FILE, 'utf-8');
+    console.log('[Server] Loaded cached trips CSV from disk, length:', cachedTripsCsv.length);
+  } catch (err) {
+    console.warn('[Server] Could not read trips-cache.csv:', err);
   }
 }
 
@@ -98,9 +110,56 @@ let tripsData = [
   }
 ];
 
+const GOOGLE_SHEET_ID = '1F2MPp5fuor41sKCJIgq7D3sbu9AL1dWBBusNX4XZcGE';
+
+// Sincroniza corridas da planilha oficial do Google Sheets
+async function syncTripsFromGoogleSheets(sheetId = GOOGLE_SHEET_ID): Promise<string> {
+  try {
+    const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+    if (res.ok) {
+      const text = await res.text();
+      if (text && /data da solicita|valor da transa|id da viagem|uber/i.test(text) && text.length > 500) {
+        cachedTripsCsv = text;
+        try {
+          fs.writeFileSync(TRIPS_FILE, text, 'utf-8');
+          console.log('[Server] Corridas sincronizadas do Google Sheets:', text.length, 'bytes');
+        } catch (e) {
+          console.warn('[Server] Falha ao salvar trips-cache.csv:', e);
+        }
+        return text;
+      }
+    }
+  } catch (err) {
+    console.warn('[Server] Falha ao sincronizar corridas do Google Sheets:', err);
+  }
+
+  if (!cachedTripsCsv && fs.existsSync(TRIPS_FILE)) {
+    try {
+      cachedTripsCsv = fs.readFileSync(TRIPS_FILE, 'utf-8');
+    } catch {}
+  }
+  return cachedTripsCsv;
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  // Universal CORS Middleware for cross-device access (Mobile, Desktop, Dev, Shared App URLs)
+  app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+    next();
+  });
 
   app.use(express.json());
 
@@ -117,9 +176,6 @@ async function startServer() {
 
 // SSE clients connected for live target synchronization across all users
 const sseTargetClients = new Set<express.Response>();
-
-const GOOGLE_SHEET_ID = '1F2MPp5fuor41sKCJIgq7D3sbu9AL1dWBBusNX4XZcGE';
-let lastSheetTargetCheck = 0;
 
 async function syncTargetFromGoogleSheets(sheetId = GOOGLE_SHEET_ID): Promise<typeof currentTargetConfig> {
   try {
@@ -264,9 +320,7 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
 
-    // Sincroniza sempre em background com anti-cache
-    await syncTargetFromGoogleSheets();
-
+    // Retorna a meta atual imediatamente
     res.json({
       success: true,
       target: getSanitizedTargetConfig()
@@ -289,12 +343,13 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
 
     sseTargetClients.add(res);
 
-    // Envia o estado atual imediatamente na conexão
-    const current = getLatestTargetConfig();
+    // Envia o estado atual sanitizado imediatamente na conexão
+    const current = getSanitizedTargetConfig();
     res.write(`data: ${JSON.stringify(current)}\n\n`);
 
     // Heartbeat a cada 25 segundos para manter a conexão aberta
@@ -363,25 +418,44 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
     });
   });
 
-  // POST /api/mobility/sheets-sync - Proxy inteligente para download direto do CSV do Google Sheets
-  app.post('/api/mobility/sheets-sync', async (req, res) => {
-    let { url } = req.body;
+  // GET & POST /api/mobility/sheets-sync - Proxy inteligente para download direto do CSV do Google Sheets
+  const handleSheetsSyncRequest = async (req: express.Request, res: express.Response) => {
+    const url = req.method === 'POST' ? req.body?.url : req.query?.url;
+    
+    // Se nenhuma URL customizada foi passada, retorna o cache do servidor se disponível
     if (!url || typeof url !== 'string' || !url.trim()) {
-      url = 'https://docs.google.com/spreadsheets/d/1F2MPp5fuor41sKCJIgq7D3sbu9AL1dWBBusNX4XZcGE/edit';
+      if (cachedTripsCsv && cachedTripsCsv.length > 500) {
+        return res.json({
+          success: true,
+          csv: cachedTripsCsv,
+          detectedTab: 'Dados Uber',
+          sheetId: GOOGLE_SHEET_ID,
+          cached: true
+        });
+      }
+
+      // Se não há cache, sincroniza do Google Sheets agora
+      const fresh = await syncTripsFromGoogleSheets();
+      if (fresh) {
+        return res.json({
+          success: true,
+          csv: fresh,
+          detectedTab: 'Dados Uber',
+          sheetId: GOOGLE_SHEET_ID
+        });
+      }
     }
 
     try {
-      const trimmed = url.trim();
+      const trimmed = (url as string || '').trim();
       const match = trimmed.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-      const sheetId = match ? match[1] : null;
+      const sheetId = match ? match[1] : GOOGLE_SHEET_ID;
       const gidMatch = trimmed.match(/[#&?]gid=([0-9]+)/);
       const requestedGid = gidMatch ? gidMatch[1] : null;
 
       if (sheetId) {
-        // Sincroniza também a meta a partir da aba Config da planilha
         syncTargetFromGoogleSheets(sheetId).catch(() => {});
 
-        // Tenta primeiro o gid requisitado ou 0
         const initialGid = requestedGid !== null ? requestedGid : '0';
         const targetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${initialGid}`;
         
@@ -396,6 +470,10 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
           const hasTripHeaders = /data da solicita|valor da transa|id da viagem|uber|preço|preco/i.test(csv);
 
           if (hasTripHeaders) {
+            if (sheetId === GOOGLE_SHEET_ID && initialGid === '0') {
+              cachedTripsCsv = csv;
+              try { fs.writeFileSync(TRIPS_FILE, csv, 'utf-8'); } catch {}
+            }
             return res.json({ 
               success: true, 
               csv, 
@@ -404,8 +482,6 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
             });
           }
 
-          // Se a aba requisitada NÃO tiver corridas detalhadas (ex.: usuário copiou URL na aba Dados Taxi Moover gid=1976358613),
-          // tenta automaticamente a aba principal gid=0 (onde fica a base Dados Uber)
           if (initialGid !== '0') {
             const fallbackUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
             const fbResponse = await fetch(fallbackUrl, {
@@ -418,6 +494,10 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
               const fbCsv = await fbResponse.text();
               const fbHasTripHeaders = /data da solicita|valor da transa|id da viagem|uber|preço|preco/i.test(fbCsv);
               if (fbHasTripHeaders) {
+                if (sheetId === GOOGLE_SHEET_ID) {
+                  cachedTripsCsv = fbCsv;
+                  try { fs.writeFileSync(TRIPS_FILE, fbCsv, 'utf-8'); } catch {}
+                }
                 return res.json({ 
                   success: true, 
                   csv: fbCsv, 
@@ -430,7 +510,6 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
             }
           }
 
-          // Se ainda não encontrou cabeçalho detalhado, retorna o CSV original (pode ser processado como resumo diário)
           return res.json({ 
             success: true, 
             csv, 
@@ -454,9 +533,15 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
       const csv = await response.text();
       res.json({ success: true, csv });
     } catch (err: any) {
+      if (cachedTripsCsv) {
+        return res.json({ success: true, csv: cachedTripsCsv, cached: true });
+      }
       res.status(500).json({ error: err?.message || 'Falha na conexão com Google Sheets' });
     }
-  });
+  };
+
+  app.get('/api/mobility/sheets-sync', handleSheetsSyncRequest);
+  app.post('/api/mobility/sheets-sync', handleSheetsSyncRequest);
 
   // GET /api/mobility/trips - Lista todas as corridas
   app.get('/api/mobility/trips', (_req, res) => {
@@ -551,13 +636,17 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Mobility API Server] Rodando em http://0.0.0.0:${PORT}`);
-    // Sincroniza a meta diretamente da aba Config do Google Sheets no boot
+    // Sincroniza a meta e as corridas diretamente do Google Sheets no boot
     syncTargetFromGoogleSheets();
+    syncTripsFromGoogleSheets();
     // Monitora alterações na aba Config da planilha a cada 30 segundos
     setInterval(() => {
       syncTargetFromGoogleSheets();
     }, 30000);
+    // Monitora atualizações nas corridas a cada 60 segundos
+    setInterval(() => {
+      syncTripsFromGoogleSheets();
+    }, 60000);
   });
 }
 

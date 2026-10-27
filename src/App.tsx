@@ -99,15 +99,24 @@ export default function App() {
     });
 
     const init = async () => {
-      // 1. Sincroniza a meta diretamente da aba Config do Google Sheets
-      const freshTarget = await SheetsService.syncTargetFromGoogleSheets();
-      setTargetConfig(freshTarget);
+      try {
+        // 1. Sincroniza a meta diretamente da aba Config do Google Sheets
+        const freshTarget = await SheetsService.syncTargetFromGoogleSheets();
+        setTargetConfig(freshTarget);
+      } catch (e) {
+        console.warn('Erro ao sincronizar meta inicial:', e);
+      }
 
-      // 2. Carrega as corridas e recalcula o painel
-      await SheetsService.loadInitialData();
+      try {
+        // 2. Carrega as corridas e recalcula o painel
+        await SheetsService.loadInitialData();
+      } catch (e) {
+        console.warn('Erro ao carregar dados iniciais de corridas:', e);
+      }
+
       const existingTrips = SheetsService.getTrips();
       const dates = Array.from(new Set(existingTrips.map(t => t.requestDateLocal).filter(Boolean))).sort();
-      const latest = dates[dates.length - 1] || '2026-10-22';
+      const latest = dates[dates.length - 1] || '2026-10-27';
       refreshData(latest);
     };
     init();
@@ -127,16 +136,14 @@ export default function App() {
     setIsSyncing(true);
     try {
       const cfg = SheetsService.getConfig();
-      if (cfg.sheetUrl) {
-        const res = await SheetsService.syncFromGoogleSheets(cfg.sheetUrl);
-        if (res.success) {
-          const latest = res.latestDate || (res.dates && res.dates[res.dates.length - 1]);
-          refreshData(latest);
-          const tabNotice = res.detectedTab ? ` (${res.detectedTab})` : '';
-          setGlobalNotice(`Planilha sincronizada online com sucesso! ${res.count} atendimentos processados${tabNotice}.`);
-          setTimeout(() => setGlobalNotice(null), 4000);
-          return;
-        }
+      const res = await SheetsService.syncFromGoogleSheets(cfg.sheetUrl || undefined);
+      if (res.success) {
+        const latest = res.latestDate || (res.dates && res.dates[res.dates.length - 1]);
+        refreshData(latest);
+        const tabNotice = res.detectedTab ? ` (${res.detectedTab})` : '';
+        setGlobalNotice(`Planilha sincronizada online com sucesso! ${res.count} atendimentos processados${tabNotice}.`);
+        setTimeout(() => setGlobalNotice(null), 4000);
+        return;
       }
       
       // Fallback: recarrega base local
