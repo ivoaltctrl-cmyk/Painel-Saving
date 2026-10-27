@@ -191,27 +191,6 @@ export default function App() {
         )}
 
 
-        {/* Context Strip with Brazilian Formatting */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-slate-500">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold text-slate-800">Operação Aeroporto Guarulhos (GRU)</span>
-            <span aria-hidden="true">/</span>
-            <span>Transporte de Colaboradores</span>
-            <span aria-hidden="true">/</span>
-            <span className="text-slate-900 font-medium">Uber Central vs Táxi Avulso</span>
-          </div>
-
-          <div className="flex items-center gap-3 flex-wrap">
-            <span>Base total: <strong>{trips.length} atendimentos</strong></span>
-            <span aria-hidden="true" className="text-slate-300">·</span>
-            <span>Dias na base: <strong>{availableDates.map(d => d.split('-').reverse().slice(0, 2).join('/')).join(', ')}</strong></span>
-            <span aria-hidden="true" className="text-slate-300">·</span>
-            <span className="font-mono tabular-nums text-[11px] text-slate-600">
-              Ref. Táxi Contratual: <strong>{formatBRL(taxiReferenceRate)}</strong>/pedido
-            </span>
-          </div>
-        </div>
-
         {/* Global Financial Metrics Cards */}
         <MetricCards comparison={accumulatedComparison} />
 
