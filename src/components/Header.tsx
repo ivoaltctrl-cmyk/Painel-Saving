@@ -4,8 +4,7 @@ import {
   TrendingUp, 
   Table2, 
   Code2, 
-  RefreshCw,
-  UploadCloud
+  RefreshCw
 } from 'lucide-react';
 
 export type DashboardTab = 'resumo' | 'evolucao' | 'corridas' | 'api';
@@ -13,8 +12,7 @@ export type DashboardTab = 'resumo' | 'evolucao' | 'corridas' | 'api';
 interface HeaderProps {
   activeTab: DashboardTab;
   onTabChange: (tab: DashboardTab) => void;
-  onOpenDataUpdateModal: () => void;
-  onSyncApi: () => void;
+  onSync: () => void;
   isSyncing: boolean;
   lastSyncTime: string;
   dataSourceInfo?: {
@@ -28,8 +26,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   activeTab,
   onTabChange,
-  onOpenDataUpdateModal,
-  onSyncApi,
+  onSync,
   isSyncing,
   lastSyncTime,
   dataSourceInfo,
@@ -141,22 +138,13 @@ export const Header: React.FC<HeaderProps> = ({
             )}
 
             <button
-              onClick={onSyncApi}
+              onClick={onSync}
               disabled={isSyncing}
-              title={`Última sincronização: ${lastSyncTime}`}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50 transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
+              title={`Atualizar dados diretamente da planilha oficial (última sincronização: ${lastSyncTime})`}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 border border-emerald-700 rounded-md transition-colors whitespace-nowrap shrink-0 shadow-xs disabled:opacity-60 cursor-pointer"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-emerald-600' : 'text-slate-500'}`} />
-              <span className="hidden sm:inline">{isSyncing ? 'Sincronizando...' : 'Recarregar'}</span>
-            </button>
-
-            <button
-              onClick={onOpenDataUpdateModal}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 border border-emerald-700 rounded-md transition-colors whitespace-nowrap shrink-0 shadow-xs"
-              title="Sincronizar planilha oficial ou gerenciar dados"
-            >
-              <UploadCloud className="w-4 h-4" />
-              <span>Atualizar Dados</span>
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>{isSyncing ? 'Atualizando...' : 'Atualizar Dados'}</span>
             </button>
           </div>
         </div>

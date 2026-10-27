@@ -6,7 +6,6 @@ import { DailySavingChart } from './components/DailySavingChart';
 import { TripsTable } from './components/TripsTable';
 import { ApiIntegrationPanel } from './components/ApiIntegrationPanel';
 import { TariffManagementModal } from './components/TariffManagementModal';
-import { DataUpdateModal } from './components/DataUpdateModal';
 import { SheetsService } from './services/sheetsService';
 import { 
   ExecutiveBoardComparison, 
@@ -50,7 +49,6 @@ export default function App() {
     return SheetsService.getSavingTarget();
   });
   const [isTariffModalOpen, setIsTariffModalOpen] = useState(false);
-  const [isDataUpdateModalOpen, setIsDataUpdateModalOpen] = useState(false);
   const [globalNotice, setGlobalNotice] = useState<string | null>(null);
 
   const formatBRL = (val: number) => {
@@ -160,13 +158,6 @@ export default function App() {
     }
   };
 
-  // Callback quando novos dados são inseridos via modal
-  const handleDataUpdated = (latestDate?: string) => {
-    refreshData(latestDate);
-    setGlobalNotice(`Painel atualizado com sucesso! Exibindo dados mais recentes.`);
-    setTimeout(() => setGlobalNotice(null), 4000);
-  };
-
   if (!dailyComparison || !accumulatedComparison) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500 font-mono text-xs">
@@ -183,8 +174,7 @@ export default function App() {
       <Header
         activeTab={activeTab}
         onTabChange={setActiveTab}
-        onOpenDataUpdateModal={() => setIsDataUpdateModalOpen(true)}
-        onSyncApi={handleSyncClick}
+        onSync={handleSyncClick}
         isSyncing={isSyncing}
         lastSyncTime={lastSyncTime}
         dataSourceInfo={dataSourceInfo}
@@ -307,12 +297,6 @@ export default function App() {
         )}
       </main>
 
-      {/* Modal de Atualização de Dados e Dia 23 */}
-      <DataUpdateModal
-        isOpen={isDataUpdateModalOpen}
-        onClose={() => setIsDataUpdateModalOpen(false)}
-        onDataUpdated={handleDataUpdated}
-      />
 
       {/* Modal de Gestão de Tarifas e Vigências com Auditoria */}
       <TariffManagementModal
