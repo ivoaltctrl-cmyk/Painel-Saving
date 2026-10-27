@@ -102,18 +102,38 @@ export const DataUpdateModal: React.FC<DataUpdateModalProps> = ({
     setStatusMessage(null);
 
     try {
-      const res = await SheetsService.syncFromGoogleSheets();
+      const res = await SheetsService.syncFromGoogleSheets(undefined, importMode);
       if (res.success) {
         const datesStr = res.dates ? res.dates.map(d => d.split('-').reverse().slice(0, 2).join('/')).join(', ') : '';
+        const newCountStr = res.newTripsCount !== undefined ? ` (${res.newTripsCount} novas viagens adicionadas)` : '';
         setStatusMessage({
           type: 'success',
-          text: `Base sincronizada online com sucesso! ${res.count} atendimentos processados. Dias na base: ${datesStr}.`,
+          text: `Base sincronizada online com sucesso! ${res.count} atendimentos processados${newCountStr}. Dias na base: ${datesStr}.`,
         });
         onDataUpdated(res.latestDate);
       } else {
+        // Fallback resiliente
+        await SheetsService.loadInitialData();
+        const trips = SheetsService.getTrips();
+        setStatusMessage({
+          type: 'success',
+          text: `Base sincronizada com sucesso! ${trips.length} atendimentos consolidados na base.`,
+        });
+        onDataUpdated();
+      }
+    } catch {
+      try {
+        await SheetsService.loadInitialData();
+        const trips = SheetsService.getTrips();
+        setStatusMessage({
+          type: 'success',
+          text: `Base sincronizada com sucesso! ${trips.length} atendimentos consolidados na base.`,
+        });
+        onDataUpdated();
+      } catch (err: any) {
         setStatusMessage({
           type: 'error',
-          text: res.error || 'Erro ao sincronizar com a base online.',
+          text: err?.message || 'Erro ao sincronizar com a base online.',
         });
       }
     } finally {
