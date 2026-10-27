@@ -8,9 +8,6 @@ This contains everything you need to run your app locally.
 
 View your app in AI Studio: https://ai.studio/apps/6b693a7d-47e4-4b61-8469-9b8b90aadd68
 
-## Back-end: Google Sheets
-A planilha é o back-end oficial. Publique o Code.gs como Web App e defina VITE_SHEETS_API_URL (ver .env.example) no build.
-
 ## Run Locally
 
 **Prerequisites:**  Node.js

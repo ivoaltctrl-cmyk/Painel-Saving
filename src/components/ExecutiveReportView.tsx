@@ -159,8 +159,6 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
         });
         setIsEditingTarget(false);
         onDataRefresh();
-      } catch (err: any) {
-        setSyncFeedback(err?.message || 'Falha ao gravar a meta na planilha.');
       } finally {
         setIsSavingTarget(false);
       }
