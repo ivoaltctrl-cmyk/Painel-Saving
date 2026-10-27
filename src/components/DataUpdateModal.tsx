@@ -22,11 +22,11 @@ export const DataUpdateModal: React.FC<DataUpdateModalProps> = ({
   onClose,
   onDataUpdated,
 }) => {
-  const [activeTab, setActiveTab] = useState<'upload' | 'paste' | 'sheets'>('upload');
+  const [activeTab, setActiveTab] = useState<'sheets' | 'upload' | 'paste'>('sheets');
   const [pastedText, setPastedText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
+  const [importMode, setImportMode] = useState<'merge' | 'replace'>('replace');
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -186,6 +186,18 @@ export const DataUpdateModal: React.FC<DataUpdateModalProps> = ({
         {/* Tab Navigation */}
         <div className="px-4 pt-3 border-b border-slate-200 flex gap-2 overflow-x-auto text-xs bg-white">
           <button
+            onClick={() => setActiveTab('sheets')}
+            className={`flex items-center gap-1.5 pb-2.5 px-3 border-b-2 font-semibold transition-colors whitespace-nowrap ${
+              activeTab === 'sheets'
+                ? 'border-emerald-600 text-emerald-800'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Google Sheets (Base Oficial)</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('upload')}
             className={`flex items-center gap-1.5 pb-2.5 px-3 border-b-2 font-semibold transition-colors whitespace-nowrap ${
               activeTab === 'upload'
@@ -206,19 +218,7 @@ export const DataUpdateModal: React.FC<DataUpdateModalProps> = ({
             }`}
           >
             <Clipboard className="w-3.5 h-3.5" />
-            <span>Colar Linhas da Planilha</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('sheets')}
-            className={`flex items-center gap-1.5 pb-2.5 px-3 border-b-2 font-semibold transition-colors whitespace-nowrap ${
-              activeTab === 'sheets'
-                ? 'border-slate-900 text-slate-900'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Sincronização Direta</span>
+            <span>Colar Linhas</span>
           </button>
         </div>
 
@@ -313,31 +313,39 @@ export const DataUpdateModal: React.FC<DataUpdateModalProps> = ({
             </div>
           )}
 
-          {/* TAB 3: DIRECT ONLINE SYNC */}
+          {/* TAB 1: DIRECT ONLINE SYNC (OFFICIAL) */}
           {activeTab === 'sheets' && (
             <div className="space-y-4">
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
+              <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-lg space-y-2">
                 <div className="flex items-center gap-2">
-                  <RefreshCw className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span className="font-bold text-slate-800">Conexão Operacional Direta</span>
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="font-bold text-slate-900 text-xs">Planilha Oficial do Google Sheets</span>
                 </div>
-                <p className="text-[11px] text-slate-600 leading-relaxed">
-                  O painel se conecta diretamente ao repositório corporativo seguro para atualizar as viagens mais recentes e consolidar o cálculo executivo de saving.
+                <p className="text-[11px] text-slate-700 leading-relaxed">
+                  A planilha Google Sheets corporativa é a <strong>fonte oficial única de dados</strong> para todos os usuários e equipamentos.
                 </p>
+                <div className="pt-2 text-[11px] text-slate-600 space-y-1 font-mono">
+                  <div>• Aba de Corridas: <span className="font-semibold text-slate-800">Dados Uber</span></div>
+                  <div>• Aba de Meta: <span className="font-semibold text-slate-800">Config</span> (Meta de Saving)</div>
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-md text-[11px] text-slate-600">
+                A sincronização lê as atualizações da planilha diretamente na nuvem com CORS habilitado, garantindo que qualquer equipamento (inclusive navegadores móveis e Cloudflare) veja exatamente os mesmos dados.
               </div>
 
               <div className="flex items-center justify-between pt-2">
                 <span className="text-[11px] text-slate-500">
-                  Sincronização imediata em segundo plano.
+                  Modo: <strong>Substituir base local pela oficial</strong>
                 </span>
                 <button
                   type="button"
                   onClick={handleSyncGoogleSheets}
                   disabled={isProcessing}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-md disabled:opacity-50 transition-colors shadow-xs cursor-pointer"
+                  className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-md disabled:opacity-50 transition-colors shadow-xs cursor-pointer"
                 >
                   {isProcessing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                  <span>{isProcessing ? 'Sincronizando...' : 'Sincronizar Base Online Agora'}</span>
+                  <span>{isProcessing ? 'Sincronizando...' : 'Sincronizar Planilha Oficial Agora'}</span>
                 </button>
               </div>
             </div>

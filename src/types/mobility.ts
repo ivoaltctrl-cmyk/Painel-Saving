@@ -239,6 +239,7 @@ export interface GoogleSheetsConfig {
   sheetUrl: string;
   lastSyncedAt: string;
   status: 'synced' | 'syncing' | 'error' | 'idle';
+  source?: 'google_sheets_live' | 'local_cache';
   errorMessage?: string;
   autoSyncIntervalMinutes: number;
   taxiReferenceRate: number;

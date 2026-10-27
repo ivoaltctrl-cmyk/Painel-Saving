@@ -55,6 +55,12 @@ interface ExecutiveReportViewProps {
     byCostCenter: BreakdownSlice[];
   };
   targetConfig: SavingTargetConfig;
+  dataSourceInfo?: {
+    source: 'google_sheets_live' | 'local_cache';
+    isLive: boolean;
+    lastSyncedAt: string;
+    totalTrips: number;
+  };
 }
 
 export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
@@ -72,6 +78,7 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
   outliersData,
   breakdowns,
   targetConfig,
+  dataSourceInfo,
 }) => {
   const [selectedScenario, setSelectedScenario] = useState<TaxiScenario>(SheetsService.getActiveScenario());
   const [isEditingTarget, setIsEditingTarget] = useState(false);
@@ -346,6 +353,7 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
         <div className="text-right text-[11px] text-slate-600 font-mono">
           <div>Emissão: {new Date().toLocaleDateString('pt-BR')}</div>
           <div>Cenário Contratual: {currentScenarioPercentLabel}</div>
+          <div>Base: {dataSourceInfo?.isLive ? 'Google Sheets Oficial' : 'Cópia Local'} ({dataSourceInfo?.lastSyncedAt || lastSyncTime})</div>
         </div>
       </div>
 
@@ -359,9 +367,18 @@ export const ExecutiveReportView: React.FC<ExecutiveReportViewProps> = ({
                 Painel Executivo de Saving — Operação GRU
               </h2>
             </div>
-            <p className="text-xs text-slate-500 mt-1">
-              Desembolso real Uber Central faturado comparado ao custo contratual estimado de referência do Táxi Avulso
-            </p>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-1">
+              <span>Desembolso real Uber Central faturado comparado ao custo contratual estimado de referência do Táxi Avulso</span>
+              {dataSourceInfo && (
+                <span className={`inline-flex items-center gap-1 font-medium ${
+                  dataSourceInfo.isLive ? 'text-emerald-700 font-semibold' : 'text-amber-700 font-bold'
+                }`}>
+                  <span>•</span>
+                  <span>{dataSourceInfo.isLive ? 'Planilha Oficial Google Sheets' : '⚠️ Cópia local em cache'}</span>
+                  <span className="text-slate-400">({dataSourceInfo.totalTrips} viagens)</span>
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">

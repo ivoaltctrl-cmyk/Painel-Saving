@@ -17,7 +17,7 @@ import {
   SavingTargetConfig,
   BreakdownSlice
 } from './types/mobility';
-import { ArrowRight, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { ArrowRight, ShieldCheck, CheckCircle2, AlertTriangle } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('resumo');
@@ -30,6 +30,7 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState<string>('2026-10-22');
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState('23/10/2026 às 10:22');
+  const [dataSourceInfo, setDataSourceInfo] = useState(() => SheetsService.getDataSourceInfo());
   const [taxiReferenceRate, setTaxiReferenceRate] = useState<number>(146.06);
   const [activeScenario, setActiveScenario] = useState<TaxiScenario>(1.0);
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('all');
@@ -80,6 +81,7 @@ export default function App() {
     setOutliersData(reportData.outliersData);
     setBreakdowns(reportData.breakdowns);
     setTargetConfig(reportData.targetConfig);
+    setDataSourceInfo(reportData.dataSourceInfo);
 
     if (forcedDate) {
       setSelectedDate(forcedDate);
@@ -185,10 +187,31 @@ export default function App() {
         onSyncApi={handleSyncClick}
         isSyncing={isSyncing}
         lastSyncTime={lastSyncTime}
+        dataSourceInfo={dataSourceInfo}
       />
 
       {/* Main Viewport Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        {/* Warning banner if displaying stale/local fallback cache instead of live Google Sheets */}
+        {dataSourceInfo.source === 'local_cache' && (
+          <div className="p-3.5 bg-amber-50 border border-amber-300 text-amber-900 rounded-lg text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-2.5">
+              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+              <div>
+                <span className="font-bold block sm:inline">Atenção: Exibindo cópia local em cache ({dataSourceInfo.totalTrips} viagens). </span>
+                <span className="text-amber-800">Este dispositivo ainda não sincronizou com a base oficial do Google Sheets.</span>
+              </div>
+            </div>
+            <button
+              onClick={handleSyncClick}
+              disabled={isSyncing}
+              className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-md shadow-xs transition-colors shrink-0 disabled:opacity-50 cursor-pointer"
+            >
+              {isSyncing ? 'Sincronizando...' : 'Sincronizar Planilha Agora'}
+            </button>
+          </div>
+        )}
+
         {/* Global notification if active */}
         {globalNotice && (
           <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-md text-xs flex items-center gap-2">
@@ -196,7 +219,6 @@ export default function App() {
             <span className="font-medium">{globalNotice}</span>
           </div>
         )}
-
 
         {/* Global Financial Metrics Cards */}
         <MetricCards comparison={accumulatedComparison} />
@@ -219,6 +241,7 @@ export default function App() {
               outliersData={outliersData}
               breakdowns={breakdowns}
               targetConfig={targetConfig}
+              dataSourceInfo={dataSourceInfo}
             />
 
             {/* Quick Chart Strip Below the Resumo Tables */}

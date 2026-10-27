@@ -11,8 +11,6 @@ const __dirname = path.dirname(__filename);
 // Persistence directory and file for shared settings
 const DATA_DIR = path.resolve(__dirname, 'data');
 const TARGET_FILE = path.resolve(DATA_DIR, 'target-config.json');
-const TRIPS_FILE = path.resolve(DATA_DIR, 'trips-cache.csv');
-const BUNDLED_CSV_PATH = path.resolve(__dirname, 'public/assets/aistudio/SavingTransporteAvulso_-_Dados_Uber_fb6e558e.csv');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -23,48 +21,11 @@ if (!fs.existsSync(DATA_DIR)) {
   }
 }
 
-// In-memory cache for trips CSV
+// In-memory cache for trips CSV (loaded dynamically from official Google Sheets)
 let cachedTripsCsv = '';
-if (fs.existsSync(TRIPS_FILE)) {
-  try {
-    cachedTripsCsv = fs.readFileSync(TRIPS_FILE, 'utf-8');
-    console.log('[Server] Loaded cached trips CSV from disk, length:', cachedTripsCsv.length);
-  } catch (err) {
-    console.warn('[Server] Could not read trips-cache.csv:', err);
-  }
-}
-
-if (!cachedTripsCsv && fs.existsSync(BUNDLED_CSV_PATH)) {
-  try {
-    cachedTripsCsv = fs.readFileSync(BUNDLED_CSV_PATH, 'utf-8');
-    console.log('[Server] Loaded bundled trips CSV into cache, length:', cachedTripsCsv.length);
-  } catch (err) {
-    console.warn('[Server] Could not read bundled trips CSV:', err);
-  }
-}
+let cachedTripsTimestamp = '';
 
 function getValidTripsCsv(): string {
-  if (cachedTripsCsv && cachedTripsCsv.length > 500) {
-    return cachedTripsCsv;
-  }
-  if (fs.existsSync(TRIPS_FILE)) {
-    try {
-      const txt = fs.readFileSync(TRIPS_FILE, 'utf-8');
-      if (txt.length > 500) {
-        cachedTripsCsv = txt;
-        return txt;
-      }
-    } catch {}
-  }
-  if (fs.existsSync(BUNDLED_CSV_PATH)) {
-    try {
-      const txt = fs.readFileSync(BUNDLED_CSV_PATH, 'utf-8');
-      if (txt.length > 500) {
-        cachedTripsCsv = txt;
-        return txt;
-      }
-    } catch {}
-  }
   return cachedTripsCsv;
 }
 
@@ -148,33 +109,49 @@ let tripsData = [
 
 const GOOGLE_SHEET_ID = '1F2MPp5fuor41sKCJIgq7D3sbu9AL1dWBBusNX4XZcGE';
 
-// Sincroniza corridas da planilha oficial do Google Sheets
+// Sincroniza corridas da planilha oficial do Google Sheets (aba Dados Uber)
 async function syncTripsFromGoogleSheets(sheetId = GOOGLE_SHEET_ID): Promise<string> {
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache'
+  };
+
+  // 1. Tenta a aba Dados Uber explicitamente via GViz (garante a aba correta independente do gid)
   try {
-    const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
-    });
+    const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=Dados%20Uber&_t=${Date.now()}`;
+    const res = await fetch(gvizUrl, { headers });
     if (res.ok) {
       const text = await res.text();
       if (text && /data da solicita|valor da transa|id da viagem|uber/i.test(text) && text.length > 500) {
         cachedTripsCsv = text;
-        try {
-          fs.writeFileSync(TRIPS_FILE, text, 'utf-8');
-          console.log('[Server] Corridas sincronizadas do Google Sheets:', text.length, 'bytes');
-        } catch (e) {
-          console.warn('[Server] Falha ao salvar trips-cache.csv:', e);
-        }
+        cachedTripsTimestamp = new Date().toISOString();
+        console.log('[Server] Corridas sincronizadas com sucesso da aba Dados Uber (GViz):', text.length, 'bytes');
         return text;
       }
     }
   } catch (err) {
-    console.warn('[Server] Falha ao sincronizar corridas do Google Sheets:', err);
+    console.warn('[Server] Falha ao sincronizar via GViz:', err);
   }
 
-  return getValidTripsCsv();
+  // 2. Fallback: export padrão CSV
+  try {
+    const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0&_t=${Date.now()}`;
+    const res = await fetch(exportUrl, { headers });
+    if (res.ok) {
+      const text = await res.text();
+      if (text && /data da solicita|valor da transa|id da viagem|uber/i.test(text) && text.length > 500) {
+        cachedTripsCsv = text;
+        cachedTripsTimestamp = new Date().toISOString();
+        console.log('[Server] Corridas sincronizadas do Google Sheets (export):', text.length, 'bytes');
+        return text;
+      }
+    }
+  } catch (err) {
+    console.warn('[Server] Falha ao sincronizar corridas do Google Sheets (export):', err);
+  }
+
+  return cachedTripsCsv;
 }
 
 async function startServer() {
@@ -458,86 +435,42 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
     if (!trimmed || trimmed === GOOGLE_SHEET_ID || trimmed.includes(GOOGLE_SHEET_ID)) {
       const fresh = await syncTripsFromGoogleSheets(GOOGLE_SHEET_ID);
       const csvToSend = fresh || getValidTripsCsv();
-      return res.json({
-        success: true,
-        csv: csvToSend,
-        detectedTab: 'Dados Uber',
-        sheetId: GOOGLE_SHEET_ID,
-        cached: !fresh || fresh === cachedTripsCsv
-      });
+      if (csvToSend && csvToSend.length > 500) {
+        return res.json({
+          success: true,
+          csv: csvToSend,
+          detectedTab: 'Dados Uber',
+          sheetId: GOOGLE_SHEET_ID,
+          source: fresh ? 'google_sheets_live' : 'local_cache',
+          cached: !fresh,
+          isStale: !fresh,
+          syncedAt: cachedTripsTimestamp || new Date().toISOString()
+        });
+      }
+      return res.status(502).json({ error: 'Não foi possível carregar dados da planilha Google Sheets oficial.' });
     }
 
     // Se uma URL customizada foi passada
     try {
       const match = trimmed.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
       const sheetId = match ? match[1] : GOOGLE_SHEET_ID;
-      const gidMatch = trimmed.match(/[#&?]gid=([0-9]+)/);
-      const requestedGid = gidMatch ? gidMatch[1] : null;
 
       if (sheetId) {
         syncTargetFromGoogleSheets(sheetId).catch(() => {});
-
-        const initialGid = requestedGid !== null ? requestedGid : '0';
-        const targetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${initialGid}`;
-        
-        try {
-          const response = await fetch(targetUrl, {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
+        const fresh = await syncTripsFromGoogleSheets(sheetId);
+        if (fresh && fresh.length > 500) {
+          return res.json({ 
+            success: true, 
+            csv: fresh, 
+            detectedTab: 'Dados Uber',
+            sheetId,
+            source: 'google_sheets_live',
+            syncedAt: new Date().toISOString()
           });
-
-          if (response.ok) {
-            const csv = await response.text();
-            const hasTripHeaders = /data da solicita|valor da transa|id da viagem|uber|preço|preco/i.test(csv);
-
-            if (hasTripHeaders) {
-              if (sheetId === GOOGLE_SHEET_ID && initialGid === '0') {
-                cachedTripsCsv = csv;
-                try { fs.writeFileSync(TRIPS_FILE, csv, 'utf-8'); } catch {}
-              }
-              return res.json({ 
-                success: true, 
-                csv, 
-                detectedTab: initialGid === '0' ? 'Dados Uber' : `Aba gid=${initialGid}`,
-                sheetId 
-              });
-            }
-
-            if (initialGid !== '0') {
-              const fallbackUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=0`;
-              const fbResponse = await fetch(fallbackUrl, {
-                headers: {
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
-              });
-
-              if (fbResponse.ok) {
-                const fbCsv = await fbResponse.text();
-                const fbHasTripHeaders = /data da solicita|valor da transa|id da viagem|uber|preço|preco/i.test(fbCsv);
-                if (fbHasTripHeaders) {
-                  if (sheetId === GOOGLE_SHEET_ID) {
-                    cachedTripsCsv = fbCsv;
-                    try { fs.writeFileSync(TRIPS_FILE, fbCsv, 'utf-8'); } catch {}
-                  }
-                  return res.json({ 
-                    success: true, 
-                    csv: fbCsv, 
-                    detectedTab: 'Dados Uber',
-                    autoSwitched: true,
-                    note: 'Aba de corridas (Dados Uber) localizada e sincronizada com sucesso.',
-                    sheetId 
-                  });
-                }
-              }
-            }
-          }
-        } catch (fetchErr) {
-          console.warn('[Server] Falha ao consultar Google Sheets customizado:', fetchErr);
         }
       }
 
-      // Fallback seguro: se falhou ou deu 404/429/etc, retorna a base consolidada sem quebrar a aplicação
+      // Fallback em memória se disponível
       const fallback = getValidTripsCsv();
       if (fallback) {
         return res.json({
@@ -545,7 +478,10 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
           csv: fallback,
           detectedTab: 'Dados Uber',
           sheetId: GOOGLE_SHEET_ID,
-          cached: true
+          source: 'local_cache',
+          cached: true,
+          isStale: true,
+          syncedAt: cachedTripsTimestamp
         });
       }
 
@@ -553,7 +489,14 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
     } catch (err: any) {
       const fallback = getValidTripsCsv();
       if (fallback) {
-        return res.json({ success: true, csv: fallback, detectedTab: 'Dados Uber', cached: true });
+        return res.json({
+          success: true,
+          csv: fallback,
+          detectedTab: 'Dados Uber',
+          source: 'local_cache',
+          cached: true,
+          isStale: true
+        });
       }
       res.status(500).json({ error: err?.message || 'Falha na conexão com Google Sheets' });
     }

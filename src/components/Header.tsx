@@ -17,6 +17,12 @@ interface HeaderProps {
   onSyncApi: () => void;
   isSyncing: boolean;
   lastSyncTime: string;
+  dataSourceInfo?: {
+    source: 'google_sheets_live' | 'local_cache';
+    isLive: boolean;
+    lastSyncedAt: string;
+    totalTrips: number;
+  };
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -26,6 +32,7 @@ export const Header: React.FC<HeaderProps> = ({
   onSyncApi,
   isSyncing,
   lastSyncTime,
+  dataSourceInfo,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-white border-b border-slate-200">
@@ -108,6 +115,31 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Zone 3: Primary Actions */}
           <div className="flex items-center gap-2 shrink-0">
+            {/* Live Sheets vs Cached Status Indicator */}
+            {dataSourceInfo && (
+              dataSourceInfo.isLive ? (
+                <div 
+                  className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-800 border border-emerald-200"
+                  title="Base oficial Google Sheets sincronizada em tempo real"
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="font-semibold">Planilha Oficial</span>
+                  <span className="text-emerald-400">·</span>
+                  <span className="text-emerald-700 font-mono text-[10px]">{dataSourceInfo.lastSyncedAt || lastSyncTime}</span>
+                </div>
+              ) : (
+                <div 
+                  className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-amber-50 text-amber-900 border border-amber-300"
+                  title="Exibindo cópia local em cache. Clique em Recarregar para buscar da planilha oficial"
+                >
+                  <span className="w-2 h-2 rounded-full bg-amber-500" />
+                  <span className="font-bold">⚠️ Cópia Local Desatualizada</span>
+                  <span className="text-amber-400">·</span>
+                  <span className="text-amber-700 font-mono text-[10px]">{dataSourceInfo.lastSyncedAt || lastSyncTime}</span>
+                </div>
+              )
+            )}
+
             <button
               onClick={onSyncApi}
               disabled={isSyncing}
@@ -121,7 +153,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onOpenDataUpdateModal}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 border border-emerald-700 rounded-md transition-colors whitespace-nowrap shrink-0 shadow-xs"
-              title="Atualizar dados: subir arquivo CSV do dia 23, colar linhas ou sincronizar planilha"
+              title="Sincronizar planilha oficial ou gerenciar dados"
             >
               <UploadCloud className="w-4 h-4" />
               <span>Atualizar Dados</span>

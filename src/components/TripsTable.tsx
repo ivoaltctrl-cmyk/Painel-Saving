@@ -93,7 +93,8 @@ export const TripsTable: React.FC<TripsTableProps> = ({
           onDataRefresh();
           setTimeout(() => setUploadNotice(null), 4000);
         } else {
-          alert(res.error || 'Erro ao processar arquivo CSV.');
+          setUploadNotice(`Erro: ${res.error || 'Erro ao processar arquivo CSV.'}`);
+          setTimeout(() => setUploadNotice(null), 5000);
         }
       }
     };
