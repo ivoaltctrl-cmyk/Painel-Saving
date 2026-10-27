@@ -8,7 +8,7 @@ import {
   UploadCloud
 } from 'lucide-react';
 
-export type DashboardTab = 'resumo' | 'evolucao' | 'corridas' | 'api';
+export type DashboardTab = 'resumo' | 'evolucao' | 'corridas';
 
 interface HeaderProps {
   activeTab: DashboardTab;
@@ -93,17 +93,6 @@ export const Header: React.FC<HeaderProps> = ({
               <span>Base de Corridas</span>
             </button>
 
-            <button
-              onClick={() => onTabChange('api')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md whitespace-nowrap transition-colors ${
-                activeTab === 'api'
-                  ? 'bg-slate-900 text-white font-bold shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium'
-              }`}
-            >
-              <Code2 className="w-3.5 h-3.5" />
-              <span>API REST</span>
-            </button>
           </nav>
 
           {/* Zone 3: Primary Actions */}

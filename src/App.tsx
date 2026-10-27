@@ -4,7 +4,6 @@ import { MetricCards } from './components/MetricCards';
 import { ExecutiveReportView } from './components/ExecutiveReportView';
 import { DailySavingChart } from './components/DailySavingChart';
 import { TripsTable } from './components/TripsTable';
-import { ApiIntegrationPanel } from './components/ApiIntegrationPanel';
 import { TariffManagementModal } from './components/TariffManagementModal';
 import { DataUpdateModal } from './components/DataUpdateModal';
 import { SheetsService } from './services/sheetsService';
@@ -91,6 +90,9 @@ export default function App() {
     setLastSyncTime(cfg.lastSyncedAt);
   }, [selectedDate]);
 
+  const refreshRef = useRef(refreshData);
+  refreshRef.current = refreshData;
+
   // Initial load & real-time target synchronization
   useEffect(() => {
     // Escuta alterações de meta em tempo real (SSE, BroadcastChannel, polling)
@@ -98,18 +100,14 @@ export default function App() {
       setTargetConfig(newTarget);
     });
 
+    const unsubscribeData = SheetsService.subscribeData(() => refreshRef.current());
+    SheetsService.startTargetSync();
+
     const init = async () => {
       try {
-        // 1. Sincroniza a meta diretamente da aba Config do Google Sheets
-        const freshTarget = await SheetsService.syncTargetFromGoogleSheets();
-        setTargetConfig(freshTarget);
-      } catch (e) {
-        console.warn('Erro ao sincronizar meta inicial:', e);
-      }
-
-      try {
-        // 2. Carrega as corridas e recalcula o painel
+        // Meta (aba Config) e corridas (aba Dados Uber) vêm da planilha numa única chamada
         await SheetsService.loadInitialData();
+        setTargetConfig(SheetsService.getSavingTarget());
       } catch (e) {
         console.warn('Erro ao carregar dados iniciais de corridas:', e);
       }
@@ -123,6 +121,7 @@ export default function App() {
 
     return () => {
       unsubscribeTarget();
+      unsubscribeData();
     };
   }, []);
 
@@ -276,12 +275,6 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 4: API REST */}
-        {activeTab === 'api' && (
-          <div className="space-y-6">
-            <ApiIntegrationPanel />
-          </div>
-        )}
       </main>
 
       {/* Modal de Atualização de Dados e Dia 23 */}

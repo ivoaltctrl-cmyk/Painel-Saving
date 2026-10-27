@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo } from 'react';
 import { UberCsvTripRecord } from '../types/mobility';
 import { SheetsService } from '../services/sheetsService';
 import { 
@@ -6,7 +6,6 @@ import {
   Download, 
   Users, 
   MapPin, 
-  Upload,
   ChevronDown,
   ChevronUp,
   CheckCircle2
@@ -28,9 +27,7 @@ export const TripsTable: React.FC<TripsTableProps> = ({
   const [selectedStops, setSelectedStops] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'date' | 'saving' | 'cost' | 'passengers'>('date');
   const [expandedTripId, setExpandedTripId] = useState<string | null>(null);
-  const [uploadNotice, setUploadNotice] = useState<string | null>(null);
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const formatBRL = (val: number) => {
     return val.toLocaleString('pt-BR', {
@@ -78,27 +75,6 @@ export const TripsTable: React.FC<TripsTableProps> = ({
   const totalFilteredTaxi = filteredTrips.length * taxiReferenceRate;
   const totalFilteredSaving = totalFilteredTaxi - totalFilteredUber;
   const totalFilteredPassengers = filteredTrips.reduce((acc, t) => acc + t.passengerCount, 0);
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      if (content) {
-        const res = SheetsService.importFromCsvText(content);
-        if (res.success) {
-          setUploadNotice(`Planilha atualizada com sucesso! ${res.count} atendimentos processados.`);
-          onDataRefresh();
-          setTimeout(() => setUploadNotice(null), 4000);
-        } else {
-          alert(res.error || 'Erro ao processar arquivo CSV.');
-        }
-      }
-    };
-    reader.readAsText(file, 'utf-8');
-  };
 
   const handleExportCSV = () => {
     const headers = [
@@ -152,14 +128,6 @@ export const TripsTable: React.FC<TripsTableProps> = ({
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-5">
-      {/* Upload confirmation notice */}
-      {uploadNotice && (
-        <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-md text-xs flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-          <span className="font-medium">{uploadNotice}</span>
-        </div>
-      )}
-
       {/* Table Header */}
       <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between pb-4 border-b border-slate-100 gap-4">
         <div>
@@ -180,23 +148,6 @@ export const TripsTable: React.FC<TripsTableProps> = ({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <input
-            type="file"
-            accept=".csv"
-            ref={fileInputRef}
-            onChange={handleFileUpload}
-            className="hidden"
-          />
-
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-md transition-colors"
-            title="Importar arquivo CSV atualizado da planilha"
-          >
-            <Upload className="w-3.5 h-3.5 text-slate-600" />
-            <span>Atualizar CSV</span>
-          </button>
-
           <button
             onClick={handleExportCSV}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors"
