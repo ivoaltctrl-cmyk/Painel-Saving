@@ -27,7 +27,7 @@ export const MonthlyView: React.FC<MonthlyViewProps> = ({ dailyRecords, monthlyT
       .then(async r => {
         const txt = await r.text();
         let d: any;
-        try { d = JSON.parse(txt); } catch { throw new Error('o servidor não respondeu /api/mobility/taxi-real (reinicie o servidor com o server.ts atualizado)'); }
+        try { d = JSON.parse(txt); } catch { throw new Error(`resposta inesperada de /api/mobility/taxi-real (HTTP ${r.status}, ${r.headers.get('content-type') || 'sem content-type'}): ${txt.replace(/\s+/g, ' ').slice(0, 120)}`); }
         if (!r.ok || d.error) throw new Error(d.error || `HTTP ${r.status}`);
         return d;
       })
