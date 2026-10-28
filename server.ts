@@ -505,6 +505,63 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
   app.get('/api/mobility/sheets-sync', handleSheetsSyncRequest);
   app.post('/api/mobility/sheets-sync', handleSheetsSyncRequest);
 
+  // GET /api/mobility/taxi-real - Pagamentos reais do táxi (aba "Histórico Pagamentos Táxi Moove")
+  app.get('/api/mobility/taxi-real', async (_req, res) => {
+    const toNum = (raw: string): number | null => {
+      const t = (raw || '').replace(/R\$|\s/g, '');
+      if (!t) return null;
+      let n: number;
+      if (t.includes(',')) n = parseFloat(t.replace(/\./g, '').replace(',', '.'));
+      else if (/^\d{1,3}(\.\d{3})+$/.test(t)) n = parseFloat(t.replace(/\./g, ''));
+      else n = parseFloat(t);
+      return Number.isFinite(n) ? n : null;
+    };
+    const splitLine = (line: string): string[] => {
+      const out: string[] = [];
+      const re = /"((?:[^"]|"")*)"|([^,]*)/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(line)) !== null) {
+        out.push(m[1] !== undefined ? m[1].replace(/""/g, '"') : m[2]);
+        if (re.lastIndex >= line.length) break;
+        re.lastIndex++;
+      }
+      return out;
+    };
+    try {
+      // Nome da aba: ajuste aqui se mudar na planilha (o primeiro que responder com o cabeçalho "Valor Real" vale)
+      const sheetNames = [
+        'Histórico Pagamentos Táxi Moove',
+        'Histórico Pagamentos Táxi Moover',
+        'Histórico Pagamentos Taxi Moove',
+        'Histórico Pagamentos Taxi Moover',
+      ];
+      let csv = '';
+      for (const name of sheetNames) {
+        const url = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(name)}&_t=${Date.now()}`;
+        const r = await fetch(url);
+        const t = r.ok ? await r.text() : '';
+        if (/valor real/i.test(t)) { csv = t; break; }
+      }
+      if (!csv) throw new Error('Aba do histórico do táxi não encontrada');
+      const lines = csv.split(/\r?\n/).map(l => l.trim()).filter(Boolean).slice(1);
+      const rows: { monthKey: string; value: number | null; qty: number | null }[] = [];
+      for (const line of lines) {
+        const [d, v, q] = splitLine(line);
+        // aceita MM/DD/AAAA (mesmo com dia inválido, ex.: 02/30) e AAAA-MM-DD
+        let monthKey = '';
+        const us = (d || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        const iso = (d || '').match(/(\d{4})-(\d{2})-\d{2}/);
+        if (us) monthKey = `${us[3]}-${us[1].padStart(2, '0')}`;
+        else if (iso) monthKey = `${iso[1]}-${iso[2]}`;
+        if (!monthKey) continue;
+        rows.push({ monthKey, value: toNum(v), qty: toNum(q) });
+      }
+      res.json({ rows });
+    } catch (err: any) {
+      res.status(502).json({ error: err?.message || 'Falha ao ler o histórico do táxi', rows: [] });
+    }
+  });
+
   // GET /api/mobility/trips - Lista todas as corridas
   app.get('/api/mobility/trips', (_req, res) => {
     res.json({

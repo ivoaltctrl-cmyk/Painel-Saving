@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { DailySavingRecord, UberCsvTripRecord, SavingTargetConfig } from '../types/mobility';
+import { MonthlyView } from './MonthlyView';
 import { Users, TrendingUp, DollarSign, Calendar, ChevronRight, MapPin, Award, MousePointerClick, Target, BarChart3, ArrowUpRight } from 'lucide-react';
 
 interface DailySavingChartProps {
@@ -15,6 +16,7 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
 }) => {
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [viewMode, setViewMode] = useState<'dia' | 'mes'>('dia');
 
   const formatBRL = (val: number) => {
     return val.toLocaleString('pt-BR', {
@@ -102,10 +104,10 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-4 border-b border-slate-100 gap-4">
           <div>
             <h2 className="text-base font-bold text-slate-900">
-              Evolução Diária do Saving e Curva Acumulada
+              {viewMode === 'dia' ? 'Evolução Diária do Saving e Curva Acumulada' : 'Evolução Mensal do Custo e do Saving'}
             </h2>
             <div className="flex items-center gap-2 text-xs text-slate-500 mt-1 flex-wrap">
-              <span>Comparativo diário de desembolso efetivo Uber vs táxi estimado</span>
+              <span>{viewMode === 'dia' ? 'Comparativo diário de desembolso efetivo Uber vs táxi estimado' : 'Táxi real pago, táxi estimado e Uber realizado por mês'}</span>
               <span aria-hidden="true">·</span>
               <span className="font-mono tabular-nums text-emerald-700 font-bold">
                 Saving Total: {formatBRL(totalSaving)}
@@ -113,7 +115,20 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
             </div>
           </div>
 
-          {/* Legend */}
+          <div className="flex flex-col items-start sm:items-end gap-2">
+          <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5 text-xs" role="group" aria-label="Visão do gráfico">
+            {(['dia', 'mes'] as const).map(m => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setViewMode(m)}
+                className={`px-3 py-1 rounded font-semibold ${viewMode === m ? 'bg-slate-900 text-white' : 'text-slate-600 hover:text-slate-900'}`}
+              >
+                {m === 'dia' ? 'Dia' : 'Mês'}
+              </button>
+            ))}
+          </div>
+          {viewMode === 'dia' && (
           <div className="flex items-center gap-3 text-xs text-slate-600 flex-wrap">
             <div className="flex items-center gap-1.5">
               <span className="w-3 h-3 rounded-xs bg-slate-300 inline-block"></span>
@@ -137,6 +152,8 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
               <span className="w-2 h-2 rounded-full bg-amber-600 border border-white inline-block -ml-1"></span>
               <span className="font-semibold text-amber-800">Ritmo da Meta ({formatBRL(monthlyTarget / daysInMonth)}/dia)</span>
             </div>
+          </div>
+          )}
           </div>
         </div>
 
@@ -223,6 +240,9 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
           </div>
         </div>
 
+        {viewMode === 'mes' ? (
+          <MonthlyView dailyRecords={dailyRecords} monthlyTarget={monthlyTarget} />
+        ) : (<>
         {/* SVG Daily Chart */}
         <div className="relative w-full overflow-x-auto pt-2">
           <svg
@@ -560,9 +580,10 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
             </div>
           </div>
         )}
+        </>)}
       </div>
 
-      {/* 3) f) Tabela com as Corridas do Dia Selecionado Logo Abaixo do Gráfico */}
+      {viewMode === 'dia' && (
       <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-xs">
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
           <div>
@@ -639,6 +660,7 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
           </table>
         </div>
       </div>
+      )}
     </div>
   );
 };
