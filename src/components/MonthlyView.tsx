@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { DailySavingRecord } from '../types/mobility';
+import { OFFICIAL_GOOGLE_SHEET_ID } from '../services/sheetsService';
 
 interface TaxiRealRow { monthKey: string; value: number | null; qty: number | null }
 interface MonthlyViewProps { dailyRecords: DailySavingRecord[]; monthlyTarget: number }
@@ -16,6 +17,51 @@ const MONTHS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', '
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 });
 const mil = (v: number) => `${Math.round(v / 1000)}k`;
 
+const TAXI_REAL_SHEET = 'Histórico Pagamentos Táxi Moove';
+
+const toNum = (raw: string): number | null => {
+  const t = (raw || '').replace(/R\$|\s/g, '');
+  if (!t) return null;
+  let n: number;
+  if (t.includes(',')) n = parseFloat(t.replace(/\./g, '').replace(',', '.'));
+  else if (/^\d{1,3}(\.\d{3})+$/.test(t)) n = parseFloat(t.replace(/\./g, ''));
+  else n = parseFloat(t);
+  return Number.isFinite(n) ? n : null;
+};
+
+const splitLine = (line: string): string[] => {
+  const out: string[] = [];
+  const re = /"((?:[^"]|"")*)"|([^,]*)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(line)) !== null) {
+    out.push(m[1] !== undefined ? m[1].replace(/""/g, '"') : m[2]);
+    if (re.lastIndex >= line.length) break;
+    re.lastIndex++;
+  }
+  return out;
+};
+
+// Lê a aba direto do Google Sheets (mesmo método usado para Dados Uber e Config; não depende de servidor)
+async function loadTaxiReal(): Promise<TaxiRealRow[]> {
+  const url = `https://docs.google.com/spreadsheets/d/${OFFICIAL_GOOGLE_SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent(TAXI_REAL_SHEET)}&_t=${Date.now()}`;
+  const r = await fetch(url, { cache: 'no-store' });
+  const csv = r.ok ? await r.text() : '';
+  if (!/valor real/i.test(csv)) {
+    throw new Error(`aba "${TAXI_REAL_SHEET}" não encontrada ou sem acesso (HTTP ${r.status}, ${csv.length} bytes)`);
+  }
+  const rows: TaxiRealRow[] = [];
+  csv.split(/\r?\n/).map(l => l.trim()).filter(Boolean).slice(1).forEach(line => {
+    const [d, v, q] = splitLine(line);
+    let monthKey = '';
+    const us = (d || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    const iso = (d || '').match(/(\d{4})-(\d{2})-\d{2}/);
+    if (us) monthKey = `${us[3]}-${us[1].padStart(2, '0')}`;
+    else if (iso) monthKey = `${iso[1]}-${iso[2]}`;
+    if (monthKey) rows.push({ monthKey, value: toNum(v), qty: toNum(q) });
+  });
+  return rows;
+}
+
 export const MonthlyView: React.FC<MonthlyViewProps> = ({ dailyRecords, monthlyTarget }) => {
   const [taxiReal, setTaxiReal] = useState<TaxiRealRow[]>([]);
   const [loadError, setLoadError] = useState('');
@@ -23,15 +69,8 @@ export const MonthlyView: React.FC<MonthlyViewProps> = ({ dailyRecords, monthlyT
 
   useEffect(() => {
     let alive = true;
-    fetch('/api/mobility/taxi-real')
-      .then(async r => {
-        const txt = await r.text();
-        let d: any;
-        try { d = JSON.parse(txt); } catch { throw new Error(`resposta inesperada de /api/mobility/taxi-real (HTTP ${r.status}, ${r.headers.get('content-type') || 'sem content-type'}): ${txt.replace(/\s+/g, ' ').slice(0, 120)}`); }
-        if (!r.ok || d.error) throw new Error(d.error || `HTTP ${r.status}`);
-        return d;
-      })
-      .then(d => { if (alive) { setTaxiReal(d.rows || []); setLoadError((d.rows || []).length ? '' : 'a aba foi lida, mas não retornou nenhum mês'); } })
+    loadTaxiReal()
+      .then(rows => { if (alive) { setTaxiReal(rows); setLoadError(rows.length ? '' : 'a aba foi lida, mas não retornou nenhum mês'); } })
       .catch(e => { if (alive) setLoadError(e?.message || 'erro desconhecido'); });
     return () => { alive = false; };
   }, []);
