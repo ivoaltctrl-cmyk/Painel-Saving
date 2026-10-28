@@ -18,15 +18,21 @@ const mil = (v: number) => `${Math.round(v / 1000)}k`;
 
 export const MonthlyView: React.FC<MonthlyViewProps> = ({ dailyRecords, monthlyTarget }) => {
   const [taxiReal, setTaxiReal] = useState<TaxiRealRow[]>([]);
-  const [loadError, setLoadError] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [selected, setSelected] = useState<string>('');
 
   useEffect(() => {
     let alive = true;
     fetch('/api/mobility/taxi-real')
-      .then(r => r.json())
-      .then(d => { if (alive) { setTaxiReal(d.rows || []); setLoadError(!!d.error); } })
-      .catch(() => { if (alive) setLoadError(true); });
+      .then(async r => {
+        const txt = await r.text();
+        let d: any;
+        try { d = JSON.parse(txt); } catch { throw new Error('o servidor não respondeu /api/mobility/taxi-real (reinicie o servidor com o server.ts atualizado)'); }
+        if (!r.ok || d.error) throw new Error(d.error || `HTTP ${r.status}`);
+        return d;
+      })
+      .then(d => { if (alive) { setTaxiReal(d.rows || []); setLoadError((d.rows || []).length ? '' : 'a aba foi lida, mas não retornou nenhum mês'); } })
+      .catch(e => { if (alive) setLoadError(e?.message || 'erro desconhecido'); });
     return () => { alive = false; };
   }, []);
 
@@ -68,11 +74,16 @@ export const MonthlyView: React.FC<MonthlyViewProps> = ({ dailyRecords, monthlyT
   const savingYear = months.filter(m => m.kind === 'uber').reduce((a, m) => a + (m.taxiEst - m.uber), 0);
 
   if (!months.length) {
-    return <div className="py-10 text-center text-xs text-slate-500">{loadError ? 'Não foi possível ler o histórico do táxi na planilha.' : 'Carregando meses…'}</div>;
+    return <div className="py-10 text-center text-xs text-slate-500">{loadError ? `Histórico do táxi não carregado: ${loadError}` : 'Carregando meses…'}</div>;
   }
 
   return (
     <div className="pt-3">
+      {loadError && (
+        <div className="mb-2 p-2 text-xs rounded border border-amber-300 bg-amber-50 text-amber-800">
+          Histórico do táxi não carregado: {loadError}
+        </div>
+      )}
       <div className="flex items-center gap-4 text-xs text-slate-600 flex-wrap mb-1">
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-xs inline-block" style={{ background: '#64748b' }} />Táxi real pago</span>
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-xs bg-slate-300 inline-block" />Táxi estimado</span>

@@ -527,6 +527,7 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
       }
       return out;
     };
+    const diag: string[] = [];
     try {
       // Nome da aba: ajuste aqui se mudar na planilha (o primeiro que responder com o cabeçalho "Valor Real" vale)
       const sheetNames = [
@@ -536,13 +537,22 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
         'Histórico Pagamentos Taxi Moover',
       ];
       let csv = '';
-      for (const name of sheetNames) {
-        const url = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(name)}&_t=${Date.now()}`;
-        const r = await fetch(url);
-        const t = r.ok ? await r.text() : '';
-        if (/valor real/i.test(t)) { csv = t; break; }
+      // Opcional: defina TAXI_REAL_GID (número após #gid= na URL da aba) para não depender do nome
+      const attempts: { label: string; q: string }[] = [];
+      if (process.env.TAXI_REAL_GID) attempts.push({ label: `gid ${process.env.TAXI_REAL_GID}`, q: `gid=${encodeURIComponent(process.env.TAXI_REAL_GID)}` });
+      sheetNames.forEach(n => attempts.push({ label: n, q: `sheet=${encodeURIComponent(n)}` }));
+      for (const a of attempts) {
+        const url = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/gviz/tq?tqx=out:csv&headers=1&${a.q}&_t=${Date.now()}`;
+        try {
+          const r = await fetch(url);
+          const t = r.ok ? await r.text() : '';
+          diag.push(`${a.label}: HTTP ${r.status}, ${t.length} bytes${t && !/valor real/i.test(t) ? ', sem cabeçalho "Valor Real"' : ''}`);
+          if (/valor real/i.test(t)) { csv = t; break; }
+        } catch (e: any) {
+          diag.push(`${a.label}: ${e?.message || 'falha de rede'}`);
+        }
       }
-      if (!csv) throw new Error('Aba do histórico do táxi não encontrada');
+      if (!csv) throw new Error('Aba do histórico do táxi não encontrada ou sem acesso. Tentativas: ' + diag.join(' | '));
       const lines = csv.split(/\r?\n/).map(l => l.trim()).filter(Boolean).slice(1);
       const rows: { monthKey: string; value: number | null; qty: number | null }[] = [];
       for (const line of lines) {
@@ -556,8 +566,10 @@ function broadcastTargetUpdate(target: typeof currentTargetConfig) {
         if (!monthKey) continue;
         rows.push({ monthKey, value: toNum(v), qty: toNum(q) });
       }
+      console.log('[Server] Histórico táxi real lido:', rows.length, 'meses');
       res.json({ rows });
     } catch (err: any) {
+      console.warn('[Server] Falha no histórico táxi real:', err?.message);
       res.status(502).json({ error: err?.message || 'Falha ao ler o histórico do táxi', rows: [] });
     }
   });
