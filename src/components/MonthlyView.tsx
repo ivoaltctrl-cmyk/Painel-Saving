@@ -62,16 +62,32 @@ async function loadTaxiReal(): Promise<TaxiRealRow[]> {
   return rows;
 }
 
+let taxiRealCache: { rows: TaxiRealRow[]; at: number } | null = null;
+let taxiRealPromise: Promise<TaxiRealRow[]> | null = null;
+const CACHE_MS = 5 * 60 * 1000;
+
+// Chamada logo que o gráfico aparece, para o histórico já estar pronto quando o usuário clicar em "Mês"
+export function prefetchTaxiReal(): Promise<TaxiRealRow[]> {
+  if (taxiRealCache && Date.now() - taxiRealCache.at < CACHE_MS) return Promise.resolve(taxiRealCache.rows);
+  if (!taxiRealPromise) {
+    taxiRealPromise = loadTaxiReal()
+      .then(rows => { taxiRealCache = { rows, at: Date.now() }; return rows; })
+      .finally(() => { taxiRealPromise = null; });
+  }
+  return taxiRealPromise;
+}
+
 export const MonthlyView: React.FC<MonthlyViewProps> = ({ dailyRecords, monthlyTarget }) => {
-  const [taxiReal, setTaxiReal] = useState<TaxiRealRow[]>([]);
+  const [taxiReal, setTaxiReal] = useState<TaxiRealRow[]>(taxiRealCache?.rows || []);
+  const [loading, setLoading] = useState(!taxiRealCache);
   const [loadError, setLoadError] = useState('');
   const [selected, setSelected] = useState<string>('');
 
   useEffect(() => {
     let alive = true;
-    loadTaxiReal()
-      .then(rows => { if (alive) { setTaxiReal(rows); setLoadError(rows.length ? '' : 'a aba foi lida, mas não retornou nenhum mês'); } })
-      .catch(e => { if (alive) setLoadError(e?.message || 'erro desconhecido'); });
+    prefetchTaxiReal()
+      .then(rows => { if (alive) { setTaxiReal(rows); setLoadError(rows.length ? '' : 'a aba foi lida, mas não retornou nenhum mês'); setLoading(false); } })
+      .catch(e => { if (alive) { setLoadError(e?.message || 'erro desconhecido'); setLoading(false); } });
     return () => { alive = false; };
   }, []);
 
@@ -111,6 +127,10 @@ export const MonthlyView: React.FC<MonthlyViewProps> = ({ dailyRecords, monthlyT
   const ticks = [0, 0.25, 0.5, 0.75, 1].map(t => t * maxV);
 
   const savingYear = months.filter(m => m.kind === 'uber').reduce((a, m) => a + (m.taxiEst - m.uber), 0);
+
+  if (loading) {
+    return <div className="h-80 flex items-center justify-center text-xs text-slate-500">Carregando histórico do táxi…</div>;
+  }
 
   if (!months.length) {
     return <div className="py-10 text-center text-xs text-slate-500">{loadError ? `Histórico do táxi não carregado: ${loadError}` : 'Carregando meses…'}</div>;

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DailySavingRecord, UberCsvTripRecord, SavingTargetConfig } from '../types/mobility';
-import { MonthlyView } from './MonthlyView';
+import { MonthlyView, prefetchTaxiReal } from './MonthlyView';
 import { Users, TrendingUp, DollarSign, Calendar, ChevronRight, MapPin, Award, MousePointerClick, Target, BarChart3, ArrowUpRight } from 'lucide-react';
 
 interface DailySavingChartProps {
@@ -17,6 +17,8 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<'dia' | 'mes'>('dia');
+
+  useEffect(() => { prefetchTaxiReal().catch(() => {}); }, []);
 
   const formatBRL = (val: number) => {
     return val.toLocaleString('pt-BR', {
