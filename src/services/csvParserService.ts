@@ -161,11 +161,15 @@ export class CsvParserService {
   /**
    * Extrai passageiros e contagem a partir de 'Informações da parada', 'Várias paradas' e nomes
    */
+  /**
+   * Extrai passageiros e contagem a partir de 'Informações da parada', 'Várias paradas', nomes de convidados e coluna Total Passageiro
+   */
   public static extractPassengerInfo(
     stopInfo: string, 
     multipleStopsCol: string, 
     guestFirst: string, 
-    guestLast: string
+    guestLast: string,
+    totalPassengerCol?: string
   ): { count: number; names: string[] } {
     const names: string[] = [];
     let count = 1;
@@ -191,6 +195,14 @@ export class CsvParserService {
     const parsedStops = parseInt(multipleStopsCol, 10);
     if (!isNaN(parsedStops) && parsedStops > count) {
       count = parsedStops;
+    }
+
+    if (totalPassengerCol) {
+      const cleanPass = totalPassengerCol.replace(',', '.').trim();
+      const parsedPass = parseInt(cleanPass, 10);
+      if (!isNaN(parsedPass) && parsedPass > count) {
+        count = parsedPass;
+      }
     }
 
     return {
@@ -221,7 +233,9 @@ export class CsvParserService {
   }
 
   /**
-   * Converte texto CSV completo em array tipado de UberCsvTripRecord
+   * Converte texto CSV completo em array tipado de UberCsvTripRecord.
+   * Suporta dinamicamente o novo padrão de colunas Uber (ID Viagem na Col 0, Valor na Col 6, etc.),
+   * o formato anterior da Uber e planilhas com cabeçalhos duplos.
    */
   public static parseUberCsv(
     csvText: string, 
@@ -232,100 +246,267 @@ export class CsvParserService {
     if (rawLines.length < 2) return [];
 
     const delimiter = this.detectDelimiter(rawLines[0]);
-    const header = this.parseCsvLine(rawLines[0], delimiter);
-    const normalizedHeader = header.map(h => h.trim().toLowerCase());
+
+    // Identifica linhas que são cabeçalhos no topo do arquivo (ex.: quando há cabeçalho antigo e novo simultaneamente)
+    const isHeaderLine = (cols: string[]): boolean => {
+      if (!cols || cols.length === 0) return false;
+      const first = (cols[0] || '').trim();
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}/i.test(first)) return false; // É UUID de viagem
+      if (/^\d{1,4}[/-]\d{1,2}[/-]\d{1,4}/.test(first)) return false; // É data
+
+      const joined = cols.slice(0, 20).join(' ').toLowerCase();
+      return (
+        joined.includes('data da solicita') ||
+        joined.includes('hora da solicita') ||
+        joined.includes('id da viagem') ||
+        joined.includes('endereço') ||
+        joined.includes('endereco') ||
+        joined.includes('serviço') ||
+        joined.includes('servico') ||
+        joined.includes('valor total') ||
+        joined.includes('valor da transa') ||
+        joined.includes('tipo de transa') ||
+        joined.includes('informações da parada') ||
+        joined.includes('total passageiro')
+      );
+    };
+
+    const headerIndices: number[] = [];
+    for (let i = 0; i < Math.min(5, rawLines.length); i++) {
+      const cols = this.parseCsvLine(rawLines[i], delimiter);
+      if (isHeaderLine(cols)) {
+        headerIndices.push(i);
+      }
+    }
+
+    // Se encontramos cabeçalho, selecionamos o mais próximo dos dados (o último)
+    const activeHeaderIdx = headerIndices.length > 0 ? headerIndices[headerIndices.length - 1] : 0;
+    const headerCols = this.parseCsvLine(rawLines[activeHeaderIdx], delimiter);
+    const normalizedHeader = headerCols.map(h => h.trim().toLowerCase());
 
     const findCol = (...candidates: string[]) => {
       for (const cand of candidates) {
         const lower = cand.toLowerCase();
         const idx = normalizedHeader.indexOf(lower);
         if (idx >= 0) return idx;
-        const partialIdx = normalizedHeader.findIndex(h => h.includes(lower));
+      }
+      for (const cand of candidates) {
+        const lower = cand.toLowerCase();
+        const partialIdx = normalizedHeader.findIndex(h => h && h.includes(lower));
         if (partialIdx >= 0) return partialIdx;
       }
       return -1;
     };
 
-    const dateLocalIdx = findCol('data da solicitação (local)', 'data da solicitacao (local)', 'data (local)', 'data local');
-    const timeLocalIdx = findCol('hora da solicitação (local)', 'hora da solicitacao (local)', 'hora (local)', 'hora local');
-    const dateUtcIdx = findCol('data da solicitação (utc)', 'data da solicitacao (utc)', 'data (utc)');
-    const timeUtcIdx = findCol('hora da solicitação (utc)', 'hora da solicitacao (utc)', 'hora (utc)');
-    const firstNameIdx = findCol('nome');
-    const lastNameIdx = findCol('sobrenome');
-    const emailIdx = findCol('e-mail', 'email');
-    const serviceIdx = findCol('serviço', 'servico');
-    const cityIdx = findCol('cidade');
-    const originIdx = findCol('endereço de partida', 'endereco de partida', 'origem');
-    const destIdx = findCol('endereço de destino', 'endereco de destino', 'destino');
-    const valueBrlIdx = findCol('valor da transação: brl', 'valor da transacao: brl', 'valor: brl');
-    const totalBrlIdx = findCol('valor total: brl', 'valor total (brl)', 'valor total');
-    const tripIdIdx = findCol('id da viagem/uber eats', 'id da viagem', 'id viagem');
-    const distMiIdx = findCol('distância (mi)', 'distancia (mi)', 'distância', 'distancia');
-    const durationIdx = findCol('duração (min)', 'duracao (min)', 'duração', 'duracao');
-    const costCenterIdx = findCol('código da despesa', 'codigo da despesa', 'centro de custo');
-    const groupIdx = findCol('grupo');
-    const guestFirstIdx = findCol('nome do convidado', 'nome convidado');
-    const guestLastIdx = findCol('sobrenome do convidado', 'sobrenome convidado');
-    const multipleStopsIdx = findCol('várias paradas', 'varias paradas');
-    const stopInfoIdx = findCol('informações da parada', 'informacoes da parada', 'paradas');
+    // Mapeamento dinâmico baseado no cabeçalho
+    const dynTripIdIdx = findCol('id da viagem/uber eats', 'id da viagem', 'id viagem');
+    const dynDateLocalIdx = findCol('data da solicitação (local)', 'data da solicitacao (local)', 'data (local)');
+    const dynTimeLocalIdx = findCol('hora da solicitação (local)', 'hora da solicitacao (local)', 'hora (local)');
+    const dynDateUtcIdx = findCol('data da solicitação (utc)', 'data da solicitacao (utc)', 'data (utc)');
+    const dynTimeUtcIdx = findCol('hora da solicitação (utc)', 'hora da solicitacao (utc)', 'hora (utc)');
+    const dynFirstNameIdx = findCol('nome');
+    const dynLastNameIdx = findCol('sobrenome');
+    const dynEmailIdx = findCol('e-mail', 'email');
+    const dynServiceIdx = findCol('serviço', 'servico');
+    const dynCityIdx = findCol('cidade');
+    const dynOriginIdx = findCol('endereço de partida', 'endereco de partida', 'origem');
+    const dynDestIdx = findCol('endereço de destino', 'endereco de destino', 'destino');
+    const dynTotalBrlIdx = findCol('valor total: brl', 'valor total (brl)', 'valor total');
+    const dynValueBrlIdx = findCol('valor da transação: brl', 'valor da transacao: brl', 'valor: brl');
+    const dynDistMiIdx = findCol('distância (mi)', 'distancia (mi)', 'distância', 'distancia');
+    const dynDurationIdx = findCol('duração (min)', 'duracao (min)', 'duração', 'duracao');
+    const dynCostCenterIdx = findCol('código da despesa', 'codigo da despesa', 'centro de custo');
+    const dynGroupIdx = findCol('grupo');
+    const dynGuestFirstIdx = findCol('nome do convidado', 'nome convidado');
+    const dynGuestLastIdx = findCol('sobrenome do convidado', 'sobrenome convidado');
+    const dynMultipleStopsIdx = findCol('várias paradas', 'varias paradas');
+    const dynStopInfoIdx = findCol('informações da parada', 'informacoes da parada', 'paradas');
+    const dynPassengerCountIdx = findCol('total passageiro', 'total passageiros', 'passageiros');
+
+    const parseNum = (str: string | undefined): number => {
+      if (!str) return 0;
+      let clean = str.replace(/[R$\s]/g, '').trim();
+      if (clean.includes(',') && clean.includes('.')) {
+        clean = clean.replace(/\./g, '').replace(',', '.');
+      } else if (clean.includes(',')) {
+        clean = clean.replace(',', '.');
+      }
+      const val = parseFloat(clean);
+      return !isNaN(val) ? val : 0;
+    };
 
     const records: UberCsvTripRecord[] = [];
+    const dataStartLine = headerIndices.length > 0 ? (headerIndices[headerIndices.length - 1] + 1) : 1;
 
-    for (let i = 1; i < rawLines.length; i++) {
+    for (let i = dataStartLine; i < rawLines.length; i++) {
       const cols = this.parseCsvLine(rawLines[i], delimiter);
       if (cols.length < 5) continue;
 
-      let rawVal = cols[totalBrlIdx >= 0 ? totalBrlIdx : valueBrlIdx] || cols[11] || '0';
-      // Converte valores no formato 1.234,56 ou 64,96
-      if (rawVal.includes(',') && rawVal.includes('.')) {
-        rawVal = rawVal.replace(/\./g, '').replace(',', '.');
-      } else if (rawVal.includes(',')) {
-        rawVal = rawVal.replace(',', '.');
+      // Descarta linhas de cabeçalho
+      if (isHeaderLine(cols)) continue;
+
+      const firstCol = (cols[0] || '').trim();
+
+      // Uma linha só é considerada vazia residual se NÃO possuir nenhuma informação de viagem
+      // (linhas em branco no fim da planilha onde uma fórmula na coluna final gera 0,00).
+      // Se a linha tem ID de viagem, Endereço de partida, Destino ou Data, ela é uma corrida REAL.
+      const hasTripIdentity = Boolean(
+        (firstCol && firstCol.length > 3 && firstCol !== '--') ||
+        (cols[4] && cols[4].trim().length > 3) ||
+        (cols[5] && cols[5].trim().length > 3) ||
+        (cols[7] && cols[7].trim().length >= 6)
+      );
+      if (!hasTripIdentity) continue;
+
+      const isUuidStart = /^[0-9a-f]{8}-[0-9a-f]{4}/i.test(firstCol) || (firstCol.length > 10 && firstCol.includes('-') && !firstCol.includes('/'));
+      const isDateStart = /^\d{1,4}[/-]\d{1,2}[/-]\d{1,4}/.test(firstCol);
+
+      // Determina se esta linha segue o NOVO padrão (ID na Col 0, Valor na Col 6, etc.) ou o padrão ANTERIOR
+      const isNewLayout = isUuidStart || dynTripIdIdx === 0 || (dynTotalBrlIdx === 6);
+
+      // 1. Valor da corrida (BRL)
+      let valueBrl = 0;
+      if (isNewLayout) {
+        valueBrl = parseNum(cols[dynTotalBrlIdx >= 0 ? dynTotalBrlIdx : 6]);
+        if (valueBrl <= 0 && dynValueBrlIdx >= 0) valueBrl = parseNum(cols[dynValueBrlIdx]);
+        if (valueBrl <= 0) valueBrl = parseNum(cols[6]);
+      } else {
+        valueBrl = parseNum(cols[dynTotalBrlIdx >= 0 && parseNum(cols[dynTotalBrlIdx]) > 0 ? dynTotalBrlIdx : (dynValueBrlIdx >= 0 ? dynValueBrlIdx : 11)]);
+        if (valueBrl <= 0 && cols[45]) valueBrl = parseNum(cols[45]);
+        if (valueBrl <= 0 && cols[11]) valueBrl = parseNum(cols[11]);
       }
-      const valueBrl = parseFloat(rawVal) || 0;
-      if (valueBrl <= 0) continue;
 
-      const rawDateLocal = cols[dateLocalIdx >= 0 ? dateLocalIdx : 15] || cols[0];
+      // Descarta apenas estornos/créditos negativos de fatura
+      if (valueBrl < 0) continue;
+
+      // Se o valor for exatamente 0, verifica se é uma corrida cancelada não realizada
+      const cancelType = (isNewLayout ? cols[13] : cols[70]) || '';
+      if (valueBrl === 0 && cancelType && cancelType !== '--' && !cols[4]) continue;
+
+      // 2. Data e Horário Local
+      let rawDateLocal = '';
+      let timeLocal = '';
+
+      if (isNewLayout) {
+        rawDateLocal = cols[dynDateLocalIdx >= 0 ? dynDateLocalIdx : 7] || cols[7] || '';
+        timeLocal = cols[dynTimeLocalIdx >= 0 ? dynTimeLocalIdx : 8] || cols[8] || '00:00';
+      } else {
+        rawDateLocal = cols[dynDateLocalIdx >= 0 ? dynDateLocalIdx : 15] || cols[15] || cols[0] || '';
+        timeLocal = cols[dynTimeLocalIdx >= 0 ? dynTimeLocalIdx : 16] || cols[16] || cols[1] || '00:00';
+      }
+
+      // Validação de fallback para data e hora
+      if (!rawDateLocal || (!rawDateLocal.includes('/') && !rawDateLocal.includes('-'))) {
+        if (cols[7] && (cols[7].includes('/') || cols[7].includes('-'))) rawDateLocal = cols[7];
+        else if (cols[15] && (cols[15].includes('/') || cols[15].includes('-'))) rawDateLocal = cols[15];
+        else if (cols[0] && (cols[0].includes('/') || cols[0].includes('-'))) rawDateLocal = cols[0];
+      }
+      if (!timeLocal || !timeLocal.includes(':')) {
+        if (cols[8] && cols[8].includes(':')) timeLocal = cols[8];
+        else if (cols[16] && cols[16].includes(':')) timeLocal = cols[16];
+        else if (cols[1] && cols[1].includes(':')) timeLocal = cols[1];
+        else timeLocal = '00:00';
+      }
+
       const isoDate = this.parseDateToIso(rawDateLocal);
-      const timeLocal = cols[timeLocalIdx >= 0 ? timeLocalIdx : 16] || cols[1] || '00:00';
+      if (!isoDate) continue;
 
-      const booker = `${cols[firstNameIdx >= 0 ? firstNameIdx : 2] || ''} ${cols[lastNameIdx >= 0 ? lastNameIdx : 3] || ''}`.trim();
-      const destination = cols[destIdx >= 0 ? destIdx : 8] || '';
+      // 3. ID da viagem
+      const tripId = isNewLayout
+        ? (cols[dynTripIdIdx >= 0 ? dynTripIdIdx : 0] || cols[0] || `TRIP-${i}`)
+        : (cols[dynTripIdIdx >= 0 ? dynTripIdIdx : 12] || cols[12] || `TRIP-${i}`);
+
+      // 4. Solicitante / Colaborador
+      const firstName = isNewLayout
+        ? (cols[dynFirstNameIdx >= 0 ? dynFirstNameIdx : 1] || cols[1] || '')
+        : (cols[dynFirstNameIdx >= 0 ? dynFirstNameIdx : 2] || cols[2] || '');
+      const lastName = isNewLayout
+        ? (cols[dynLastNameIdx >= 0 ? dynLastNameIdx : 2] || cols[2] || '')
+        : (cols[dynLastNameIdx >= 0 ? dynLastNameIdx : 3] || cols[3] || '');
+      const booker = `${firstName} ${lastName}`.trim() || 'Paulo Ricardo Santos Ribeiro';
+
+      // 5. Origem, Destino e Bairro
+      const origin = isNewLayout
+        ? (cols[dynOriginIdx >= 0 ? dynOriginIdx : 4] || cols[4] || '')
+        : (cols[dynOriginIdx >= 0 ? dynOriginIdx : 7] || cols[7] || '');
+      const destination = isNewLayout
+        ? (cols[dynDestIdx >= 0 ? dynDestIdx : 5] || cols[5] || '')
+        : (cols[dynDestIdx >= 0 ? dynDestIdx : 8] || cols[8] || '');
       const district = this.extractDistrict(destination);
       const shift = this.determineShift(timeLocal);
 
-      const rawCostCenter = cols[costCenterIdx >= 0 ? costCenterIdx : 28] || cols[groupIdx >= 0 ? groupIdx : 23] || '--';
-      const costCenter = rawCostCenter !== '--' ? rawCostCenter : 'Operações GRU';
+      // 6. Serviço e Cidade
+      const service = isNewLayout
+        ? (cols[dynServiceIdx >= 0 ? dynServiceIdx : 3] || cols[3] || 'Central | UberX')
+        : (cols[dynServiceIdx >= 0 ? dynServiceIdx : 5] || cols[5] || 'Central | UberX');
+      const city = isNewLayout
+        ? (cols[dynCityIdx >= 0 ? dynCityIdx : 24] || cols[24] || 'Sao Paulo')
+        : (cols[dynCityIdx >= 0 ? dynCityIdx : 6] || cols[6] || 'Sao Paulo');
 
-      const stopInfo = cols[stopInfoIdx >= 0 ? stopInfoIdx : 72] || '';
-      const multipleStops = cols[multipleStopsIdx >= 0 ? multipleStopsIdx : 67] || '';
-      const guestFirst = cols[guestFirstIdx >= 0 ? guestFirstIdx : 65] || '';
-      const guestLast = cols[guestLastIdx >= 0 ? guestLastIdx : 66] || '';
+      // 7. E-mail e Centro de Custo
+      const email = isNewLayout
+        ? (cols[dynEmailIdx >= 0 ? dynEmailIdx : 20] || cols[20] || '')
+        : (cols[dynEmailIdx >= 0 ? dynEmailIdx : 22] || cols[22] || '');
 
-      const passengerInfo = this.extractPassengerInfo(stopInfo, multipleStops, guestFirst, guestLast);
+      const rawCostCenter = isNewLayout
+        ? (cols[dynCostCenterIdx >= 0 ? dynCostCenterIdx : 28] || cols[28] || cols[dynGroupIdx >= 0 ? dynGroupIdx : 22] || '--')
+        : (cols[dynCostCenterIdx >= 0 ? dynCostCenterIdx : 28] || cols[28] || cols[dynGroupIdx >= 0 ? dynGroupIdx : 23] || '--');
+      const costCenter = (rawCostCenter && rawCostCenter !== '--') ? rawCostCenter : 'Operações GRU';
 
-      const distMi = parseFloat(cols[distMiIdx >= 0 ? distMiIdx : 26] || '0') || 0;
-      const durationMin = parseInt(cols[durationIdx >= 0 ? durationIdx : 27] || '0', 10) || 0;
+      // 8. Distância e Duração
+      const rawDist = isNewLayout
+        ? (cols[dynDistMiIdx >= 0 ? dynDistMiIdx : 26] || cols[26] || '0')
+        : (cols[dynDistMiIdx >= 0 ? dynDistMiIdx : 26] || cols[26] || '0');
+      const distMi = parseNum(rawDist);
 
-      // Tarifa nominal da vigência para a data da corrida
+      const rawDur = isNewLayout
+        ? (cols[dynDurationIdx >= 0 ? dynDurationIdx : 27] || cols[27] || '0')
+        : (cols[dynDurationIdx >= 0 ? dynDurationIdx : 27] || cols[27] || '0');
+      const durationMin = Math.round(parseNum(rawDur));
+
+      // 9. Passageiros e Paradas
+      const stopInfo = isNewLayout
+        ? (cols[dynStopInfoIdx >= 0 ? dynStopInfoIdx : 11] || cols[11] || '')
+        : (cols[dynStopInfoIdx >= 0 ? dynStopInfoIdx : 73] || cols[73] || '');
+      const multipleStops = isNewLayout
+        ? (cols[dynMultipleStopsIdx >= 0 ? dynMultipleStopsIdx : 70] || cols[70] || '')
+        : (cols[dynMultipleStopsIdx >= 0 ? dynMultipleStopsIdx : 67] || cols[67] || '');
+      const guestFirst = isNewLayout
+        ? (cols[dynGuestFirstIdx >= 0 ? dynGuestFirstIdx : 68] || cols[68] || '')
+        : (cols[dynGuestFirstIdx >= 0 ? dynGuestFirstIdx : 65] || cols[65] || '');
+      const guestLast = isNewLayout
+        ? (cols[dynGuestLastIdx >= 0 ? dynGuestLastIdx : 69] || cols[69] || '')
+        : (cols[dynGuestLastIdx >= 0 ? dynGuestLastIdx : 66] || cols[66] || '');
+      const totalPassengerCol = isNewLayout
+        ? (cols[dynPassengerCountIdx >= 0 ? dynPassengerCountIdx : 75] || cols[75] || '')
+        : (cols[dynPassengerCountIdx >= 0 ? dynPassengerCountIdx : 75] || cols[75] || '');
+
+      const passengerInfo = this.extractPassengerInfo(stopInfo, multipleStops, guestFirst, guestLast, totalPassengerCol);
+
+      // 10. Cálculos de Saving com a vigência aplicável
       const { rate: nominalRate } = this.findTariffForDate(isoDate, periods);
-      // Tarifa efetiva com o cenário conservador ativo (100%, 80%, 70% ou 50%)
       const effectiveTaxiRate = Math.round((nominalRate * scenario) * 100) / 100;
-
       const saving = Math.round((effectiveTaxiRate - valueBrl) * 100) / 100;
       const savingPercent = effectiveTaxiRate > 0 ? Math.round((saving / effectiveTaxiRate) * 1000) / 10 : 0;
 
+      const dateUtc = isNewLayout
+        ? (cols[dynDateUtcIdx >= 0 ? dynDateUtcIdx : 15] || cols[15] || '')
+        : (cols[dynDateUtcIdx >= 0 ? dynDateUtcIdx : 0] || cols[0] || '');
+      const timeUtc = isNewLayout
+        ? (cols[dynTimeUtcIdx >= 0 ? dynTimeUtcIdx : 16] || cols[16] || '')
+        : (cols[dynTimeUtcIdx >= 0 ? dynTimeUtcIdx : 1] || cols[1] || '');
+
       records.push({
-        id: cols[tripIdIdx >= 0 ? tripIdIdx : 12] || `TRIP-${i}`,
-        requestDateUtc: cols[dateUtcIdx >= 0 ? dateUtcIdx : 0] || '',
-        requestTimeUtc: cols[timeUtcIdx >= 0 ? timeUtcIdx : 1] || '',
+        id: tripId,
+        requestDateUtc: dateUtc,
+        requestTimeUtc: timeUtc,
         requestDateLocal: isoDate,
         requestTimeLocal: timeLocal,
-        bookerName: booker || 'Paulo Ricardo Santos Ribeiro',
-        email: cols[emailIdx >= 0 ? emailIdx : 22] || '',
-        service: cols[serviceIdx >= 0 ? serviceIdx : 5] || 'Central | UberX',
-        city: cols[cityIdx >= 0 ? cityIdx : 6] || 'Sao Paulo',
-        origin: cols[originIdx >= 0 ? originIdx : 7] || '',
+        bookerName: booker,
+        email,
+        service,
+        city,
+        origin,
         destination,
         destinationDistrict: district,
         shift,
