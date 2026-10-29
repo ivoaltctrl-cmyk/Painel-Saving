@@ -162,6 +162,8 @@ export const MonthlyView: React.FC<MonthlyViewProps> = ({ dailyRecords, monthlyT
             const cx = pl + i * slot + slot / 2;
             const isSel = active?.key === m.key;
             const sav = (m.taxiEstProj - m.uberProj);
+            // topo mais alto entre a projeção do táxi estimado e o táxi real, para posicionar o rótulo do saving
+            const topY = Math.min(y(m.taxiEstProj), m.realValue != null ? y(m.realValue) : Infinity);
             return (
               <g key={m.key} className="cursor-pointer" onClick={() => setSelected(m.key)}>
                 <rect x={cx - slot / 2 + 2} y={pt - 8} width={slot - 4} height={ch + 8} rx="4" fill={isSel ? '#f1f5f9' : 'transparent'} />
@@ -173,12 +175,17 @@ export const MonthlyView: React.FC<MonthlyViewProps> = ({ dailyRecords, monthlyT
                   <rect x={cx - 15} y={y(0) - 40} width="30" height="40" rx="3" fill="none" stroke="#94a3b8" strokeDasharray="4 3" />
                 )}
                 {m.kind === 'uber' && (<>
-                  {m.partial && <rect x={cx - 24} y={y(m.taxiEstProj)} width="22" height={y(0) - y(m.taxiEstProj)} rx="3" fill="none" stroke="#94a3b8" strokeDasharray="4 3" />}
-                  {m.partial && <rect x={cx + 2} y={y(m.uberProj)} width="22" height={y(0) - y(m.uberProj)} rx="3" fill="none" stroke="#94a3b8" strokeDasharray="4 3" />}
-                  <rect x={cx - 24} y={y(m.taxiEst)} width="22" height={y(0) - y(m.taxiEst)} rx="3" fill="#cbd5e1" />
-                  <rect x={cx + 2} y={y(m.uber)} width="22" height={y(0) - y(m.uber)} rx="3" fill="#0f172a" />
-                  <text x={cx} y={y(m.taxiEstProj) - 18} textAnchor="middle" fontSize="10" fontWeight="700" fill="#047857">{m.partial ? 'Saving proj.' : 'Saving'}</text>
-                  <text x={cx} y={y(m.taxiEstProj) - 6} textAnchor="middle" fontSize="10" fontWeight="700" fill="#047857">{brl(sav).replace(',00', '')}</text>
+                  {/* Táxi real pago do mês (histórico Moove), quando já preenchido na planilha */}
+                  {m.realValue != null && (<>
+                    <rect x={cx - 29} y={y(m.realValue)} width="18" height={y(0) - y(m.realValue)} rx="3" fill="#64748b" />
+                    <text x={cx - 20} y={y(m.realValue) - 5} textAnchor="middle" fontSize="10" fill="#334155">{mil(m.realValue)}</text>
+                  </>)}
+                  {m.partial && <rect x={cx - 9} y={y(m.taxiEstProj)} width="18" height={y(0) - y(m.taxiEstProj)} rx="3" fill="none" stroke="#94a3b8" strokeDasharray="4 3" />}
+                  {m.partial && <rect x={cx + 11} y={y(m.uberProj)} width="18" height={y(0) - y(m.uberProj)} rx="3" fill="none" stroke="#94a3b8" strokeDasharray="4 3" />}
+                  <rect x={cx - 9} y={y(m.taxiEst)} width="18" height={y(0) - y(m.taxiEst)} rx="3" fill="#cbd5e1" />
+                  <rect x={cx + 11} y={y(m.uber)} width="18" height={y(0) - y(m.uber)} rx="3" fill="#0f172a" />
+                  <text x={cx} y={topY - 18} textAnchor="middle" fontSize="10" fontWeight="700" fill="#047857">{m.partial ? 'Saving proj.' : 'Saving'}</text>
+                  <text x={cx} y={topY - 6} textAnchor="middle" fontSize="10" fontWeight="700" fill="#047857">{brl(sav).replace(',00', '')}</text>
                 </>)}
                 <text x={cx} y={H - 28} textAnchor="middle" fontSize="11" fontWeight="700" fill="#0f172a">{m.label}</text>
                 <text x={cx} y={H - 14} textAnchor="middle" fontSize="10" fill="#64748b">
@@ -201,6 +208,14 @@ export const MonthlyView: React.FC<MonthlyViewProps> = ({ dailyRecords, monthlyT
             <div><span className="text-slate-500 block mb-0.5">Uber realizado</span><span className="text-base font-bold font-mono text-slate-900">{brl(active.uber)}</span></div>
             <div><span className="text-slate-500 block mb-0.5">Saving</span><span className="text-base font-bold font-mono text-emerald-700">{brl(active.taxiEst - active.uber)}</span></div>
             <div><span className="text-slate-500 block mb-0.5">{active.partial ? 'Projeção do mês' : 'Meta mensal'}</span><span className="text-base font-bold font-mono text-blue-700">{active.partial ? `${brl(active.taxiEstProj - active.uberProj)} (${Math.round(((active.taxiEstProj - active.uberProj) / monthlyTarget) * 100)}% da meta)` : brl(monthlyTarget)}</span></div>
+            {active.realValue != null && (
+              <div className="col-span-2 lg:col-span-4 pt-2 border-t border-slate-200">
+                <span className="text-slate-500 block mb-0.5">Táxi real pago no mês (histórico Moove, referência)</span>
+                <span className="text-base font-bold font-mono text-slate-700">
+                  {brl(active.realValue)}{active.realQty ? ` · ${active.realQty} viagens · ${brl(active.realValue / active.realQty)} por viagem` : ''}
+                </span>
+              </div>
+            )}
           </>) : active.kind === 'real' ? (<>
             <div><span className="text-slate-500 block mb-0.5">Táxi real pago</span><span className="text-base font-bold font-mono text-slate-900">{brl(active.realValue || 0)}</span></div>
             <div><span className="text-slate-500 block mb-0.5">Quantidade</span><span className="text-base font-bold font-mono text-slate-900">{active.realQty ?? '—'}</span></div>
