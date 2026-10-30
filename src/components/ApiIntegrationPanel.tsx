@@ -11,7 +11,7 @@ export const ApiIntegrationPanel: React.FC = () => {
 
   const curlQuote = `curl -X POST https://app.mobilitysaving.com/api/mobility/quote \\
   -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer mob_live_sec_892348a9f2" \\
+  -H "Authorization: Bearer YOUR_API_TOKEN" \\
   -d '{
     "origin": "Av. Paulista, 1000",
     "destination": "Aeroporto de Congonhas",
@@ -24,7 +24,7 @@ export const ApiIntegrationPanel: React.FC = () => {
 
   const curlTripIngest = `curl -X POST https://app.mobilitysaving.com/api/mobility/trips \\
   -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer mob_live_sec_892348a9f2" \\
+  -H "Authorization: Bearer YOUR_API_TOKEN" \\
   -d '{
     "origin": "Av. Brig. Faria Lima, 3477",
     "destination": "Rua Oscar Freire, 1020",
@@ -162,9 +162,9 @@ export const ApiIntegrationPanel: React.FC = () => {
               <span className="text-[11px] text-slate-400">Ambiente de Produção</span>
             </div>
             <div className="font-mono tabular-nums text-slate-900 bg-white p-2 rounded border border-slate-200 flex justify-between items-center">
-              <span>mob_live_sec_892348a9f244109b</span>
+              <span>mob_live_••••••••••••••••</span>
               <button 
-                onClick={() => handleCopy('mob_live_sec_892348a9f244109b')}
+                onClick={() => handleCopy('YOUR_API_TOKEN')}
                 className="text-slate-400 hover:text-slate-700 p-1"
                 title="Copiar token"
               >
