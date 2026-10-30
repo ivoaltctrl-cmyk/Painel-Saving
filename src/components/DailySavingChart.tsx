@@ -224,9 +224,16 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
           </div>
           <div>
             <span className="text-slate-500 block mb-0.5">Passageiros Transportados</span>
-            <span className="text-base font-bold font-mono tabular-nums text-slate-900">
-              {totalPassengers} passageiros
-            </span>
+            <div className="flex items-baseline gap-1.5 flex-wrap">
+              <span className="text-base font-bold font-mono tabular-nums text-slate-900">
+                {totalPassengers} passageiros
+              </span>
+              {totalTrips > 0 && (
+                <span className="text-xs text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded font-mono font-semibold border border-blue-100" title="Média de colaboradores por viagem/carro">
+                  {(totalPassengers / totalTrips).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 2 })}/carro
+                </span>
+              )}
+            </div>
           </div>
           <div>
             <span className="text-slate-500 block mb-0.5">Custo Estimado Táxi</span>
