@@ -17,6 +17,12 @@ const MONTHS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', '
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 });
 const mil = (v: number) => `${Math.round(v / 1000)}k`;
 
+// Mês fechado = mês de calendário já encerrado (anterior ao mês atual, no fuso de São Paulo)
+export const isMonthClosed = (monthKey: string): boolean => {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }); // AAAA-MM-DD
+  return monthKey < today.slice(0, 7);
+};
+
 const TAXI_REAL_SHEET = 'Histórico Pagamentos Táxi Moove';
 
 const toNum = (raw: string): number | null => {
@@ -101,10 +107,9 @@ export const MonthlyView: React.FC<MonthlyViewProps> = ({ dailyRecords, monthlyT
     const realBy: Record<string, TaxiRealRow> = {};
     taxiReal.forEach(r => { realBy[r.monthKey] = r; });
     const keys = Array.from(new Set([...Object.keys(realBy), ...Object.keys(uberBy)])).sort();
-    const lastUberKey = Object.keys(uberBy).sort().pop();
     return keys.map(k => {
       const u = uberBy[k]; const r = realBy[k];
-      const partial = !!u && k === lastUberKey && u.days < 28;
+      const partial = !!u && !isMonthClosed(k);
       const f = partial ? 30 / u.days : 1;
       const kind: Kind = u ? 'uber' : (r && r.value ? 'real' : 'pendente');
       return {
@@ -210,7 +215,7 @@ export const MonthlyView: React.FC<MonthlyViewProps> = ({ dailyRecords, monthlyT
             <div><span className="text-slate-500 block mb-0.5">Táxi estimado</span><span className="text-base font-bold font-mono text-slate-400 line-through">{brl(active.taxiEst)}</span></div>
             <div><span className="text-slate-500 block mb-0.5">Uber realizado</span><span className="text-base font-bold font-mono text-slate-900">{brl(active.uber)}</span></div>
             <div><span className="text-slate-500 block mb-0.5">Saving</span><span className="text-base font-bold font-mono text-emerald-700">{brl(active.taxiEst - active.uber)}</span></div>
-            <div><span className="text-slate-500 block mb-0.5">{active.partial ? 'Projeção do mês' : 'Meta mensal'}</span><span className="text-base font-bold font-mono text-blue-700">{active.partial ? `${brl(active.taxiEstProj - active.uberProj)} (${Math.round(((active.taxiEstProj - active.uberProj) / monthlyTarget) * 100)}% da meta)` : brl(monthlyTarget)}</span></div>
+            <div><span className="text-slate-500 block mb-0.5">{active.partial ? 'Projeção do mês' : 'Meta mensal'}</span><span className="text-base font-bold font-mono text-blue-700">{active.partial ? `${brl(active.taxiEstProj - active.uberProj)} (${Math.round(((active.taxiEstProj - active.uberProj) / monthlyTarget) * 100)}% da meta)` : `${brl(monthlyTarget)} · ${Math.round(((active.taxiEst - active.uber) / monthlyTarget) * 100)}% atingido`}</span></div>
             {active.realValue != null && (
               <div className="col-span-2 lg:col-span-4 pt-2 border-t border-slate-200">
                 <span className="text-slate-500 block mb-0.5">Táxi real pago no mês (histórico Moove, referência)</span>

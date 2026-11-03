@@ -1,22 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { DailySavingRecord, UberCsvTripRecord, SavingTargetConfig } from '../types/mobility';
-import { MonthlyView, prefetchTaxiReal } from './MonthlyView';
+import { MonthlyView, prefetchTaxiReal, isMonthClosed } from './MonthlyView';
 import { Users, TrendingUp, DollarSign, Calendar, ChevronRight, MapPin, Award, MousePointerClick, Target, BarChart3, ArrowUpRight } from 'lucide-react';
 
 interface DailySavingChartProps {
   dailyRecords: DailySavingRecord[];
   allTrips?: UberCsvTripRecord[];
   targetConfig?: SavingTargetConfig;
+  defaultView?: 'dia' | 'mes';
 }
 
 export const DailySavingChart: React.FC<DailySavingChartProps> = ({ 
   dailyRecords,
   allTrips = [],
-  targetConfig
+  targetConfig,
+  defaultView = 'mes'
 }) => {
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-  const [viewMode, setViewMode] = useState<'dia' | 'mes'>('dia');
+  const [viewMode, setViewMode] = useState<'dia' | 'mes'>(defaultView);
   const [selectedMonth, setSelectedMonth] = useState<string>(''); // 'AAAA-MM' ou '' (sem filtro)
 
   useEffect(() => { prefetchTaxiReal().catch(() => {}); }, []);
@@ -41,6 +43,9 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
   const monthFilterLabel = monthFilter ? `${MONTH_NAMES[parseInt(monthFilter.slice(5), 10) - 1] || monthFilter}/${monthFilter.slice(0, 4)}` : '';
   const dash = '—';
 
+  // Mês fechado = mês de calendário encerrado (do dia 1 ao último dia): mostra o resultado realizado, sem projeção
+  const isClosedMonth = !!monthFilter && scopedRecords.length > 0 && isMonthClosed(monthFilter);
+
   const totalSaving = scopedRecords.reduce((acc, r) => acc + r.saving, 0);
   const totalUber = scopedRecords.reduce((acc, r) => acc + r.uberSpend, 0);
   const totalTaxi = scopedRecords.reduce((acc, r) => acc + r.taxiSpend, 0);
@@ -61,7 +66,9 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
   const dailyPaceNeeded = daysRemaining > 0 ? Math.max(0, (monthlyTarget - totalSaving) / daysRemaining) : 0;
   const paceGap = dailyPaceNeeded - avgDailySaving;
 
-  const annualRunRateSaving = avgDailySaving * 365;
+  const annualRunRateSaving = isClosedMonth ? totalSaving * 12 : avgDailySaving * 365;
+  const closedGap = totalSaving - monthlyTarget;
+  const closedPercent = (totalSaving / monthlyTarget) * 100;
   const annualProgressPercent = (annualRunRateSaving / annualTarget) * 100;
 
   // Escala vertical com folga para a linha real acumulada e para a linha da meta
@@ -138,7 +145,7 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
 
           <div className="flex flex-col items-start sm:items-end gap-2">
           <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5 text-xs" role="group" aria-label="Visão do gráfico">
-            {(['dia', 'mes'] as const).map(m => (
+            {(['mes', 'dia'] as const).map(m => (
               <button
                 key={m}
                 type="button"
@@ -196,33 +203,33 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
           {/* Estimativa Mensal */}
           <div className="space-y-1">
             <span className="text-[10px] font-bold text-blue-900 uppercase tracking-wider block">
-              Estimativa Mensal (30 dias)
+              {isClosedMonth ? 'Resultado do Mês (fechado)' : 'Estimativa Mensal (30 dias)'}
             </span>
             <div className="text-base font-bold font-mono tabular-nums text-blue-700">
-              {noData ? dash : formatBRL(projectedMonthlySaving)}
+              {noData ? dash : formatBRL(isClosedMonth ? totalSaving : projectedMonthlySaving)}
             </div>
             <span className="text-[10px] font-medium text-blue-800/80 block">
-              {noData ? dash : `${projectedMonthlyPercent.toFixed(1)}%`} da Meta Mensal ({formatBRL(monthlyTarget)})
+              {noData ? dash : `${(isClosedMonth ? closedPercent : projectedMonthlyPercent).toFixed(1)}%`} da Meta Mensal ({formatBRL(monthlyTarget)})
             </span>
           </div>
 
           {/* Ritmo Necessário */}
           <div className="space-y-1">
             <span className="text-[10px] font-bold text-amber-900 uppercase tracking-wider block">
-              Ritmo Necessário p/ Meta
+              {isClosedMonth ? 'Resultado vs Meta' : 'Ritmo Necessário p/ Meta'}
             </span>
             <div className="text-base font-bold font-mono tabular-nums text-amber-800">
-              {noData ? dash : formatBRL(dailyPaceNeeded)} <span className="text-xs font-normal text-slate-500">/dia</span>
+              {noData ? dash : isClosedMonth ? `${closedGap >= 0 ? '+' : '−'}${formatBRL(Math.abs(closedGap))}` : formatBRL(dailyPaceNeeded)}{!isClosedMonth && <span className="text-xs font-normal text-slate-500"> /dia</span>}
             </div>
             <span className="text-[10px] text-slate-500 block">
-              {noData ? '' : paceGap <= 0 ? 'Ritmo atual já atinge a meta!' : `Diferença de ${formatBRL(paceGap)}/dia em ${daysRemaining} dias`}
+              {noData ? '' : isClosedMonth ? (closedGap >= 0 ? 'Meta do mês superada' : 'Meta do mês não atingida') : paceGap <= 0 ? 'Ritmo atual já atinge a meta!' : `Diferença de ${formatBRL(paceGap)}/dia em ${daysRemaining} dias`}
             </span>
           </div>
 
           {/* Estimativa Anualizada */}
           <div className="space-y-1">
             <span className="text-[10px] font-bold text-emerald-900 uppercase tracking-wider block">
-              Estimativa Anual (Run-Rate)
+              {isClosedMonth ? 'Run-Rate Anual (base do mês)' : 'Estimativa Anual (Run-Rate)'}
             </span>
             <div className="text-base font-bold font-mono tabular-nums text-emerald-600">
               {noData ? dash : formatBRL(annualRunRateSaving)} <span className="text-xs font-normal text-slate-500">/ano</span>

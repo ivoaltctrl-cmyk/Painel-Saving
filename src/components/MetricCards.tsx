@@ -143,7 +143,7 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ comparison }) => {
         <div>
           <div className="flex items-center justify-between text-slate-500 mb-2">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">
-              Custo / Passageiro
+              Custo Uber / Passageiro
             </span>
             <Percent className="w-4 h-4 text-emerald-600" />
           </div>
@@ -155,6 +155,12 @@ export const MetricCards: React.FC<MetricCardsProps> = ({ comparison }) => {
           <span>No Táxi:</span>
           <span className="line-through font-mono tabular-nums text-slate-400">
             {formatBRL(comparison.taxi.avgCostPerPassenger)}
+          </span>
+        </div>
+        <div className="mt-1 text-xs text-slate-500 flex items-center gap-1.5 flex-wrap" title="Saving acumulado ÷ passageiros transportados">
+          <span>Saving / passageiro:</span>
+          <span className="font-mono tabular-nums text-emerald-700 font-semibold">
+            {formatBRL(comparison.uber.totalPassengers > 0 ? (comparison.taxi.totalCost - comparison.uber.totalCost) / comparison.uber.totalPassengers : 0)}
           </span>
         </div>
       </div>
