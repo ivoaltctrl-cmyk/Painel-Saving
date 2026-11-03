@@ -3,7 +3,7 @@ import { DailySavingRecord } from '../types/mobility';
 import { OFFICIAL_GOOGLE_SHEET_ID } from '../services/sheetsService';
 
 interface TaxiRealRow { monthKey: string; value: number | null; qty: number | null }
-interface MonthlyViewProps { dailyRecords: DailySavingRecord[]; monthlyTarget: number }
+interface MonthlyViewProps { dailyRecords: DailySavingRecord[]; monthlyTarget: number; selectedKey: string; onSelect: (key: string) => void }
 
 type Kind = 'real' | 'pendente' | 'uber';
 interface MonthItem {
@@ -77,11 +77,10 @@ export function prefetchTaxiReal(): Promise<TaxiRealRow[]> {
   return taxiRealPromise;
 }
 
-export const MonthlyView: React.FC<MonthlyViewProps> = ({ dailyRecords, monthlyTarget }) => {
+export const MonthlyView: React.FC<MonthlyViewProps> = ({ dailyRecords, monthlyTarget, selectedKey, onSelect }) => {
   const [taxiReal, setTaxiReal] = useState<TaxiRealRow[]>(taxiRealCache?.rows || []);
   const [loading, setLoading] = useState(!taxiRealCache);
   const [loadError, setLoadError] = useState('');
-  const [selected, setSelected] = useState<string>('');
 
   useEffect(() => {
     let alive = true;
@@ -117,7 +116,7 @@ export const MonthlyView: React.FC<MonthlyViewProps> = ({ dailyRecords, monthlyT
     });
   }, [dailyRecords, taxiReal]);
 
-  const active = months.find(m => m.key === selected) || [...months].reverse().find(m => m.kind === 'uber') || months[months.length - 1];
+  const active = months.find(m => m.key === selectedKey) || [...months].reverse().find(m => m.kind === 'uber') || months[months.length - 1];
 
   const W = 860, H = 300, pl = 70, pr = 30, pt = 36, pb = 50;
   const cw = W - pl - pr, ch = H - pt - pb;
@@ -126,7 +125,9 @@ export const MonthlyView: React.FC<MonthlyViewProps> = ({ dailyRecords, monthlyT
   const slot = cw / Math.max(1, months.length);
   const ticks = [0, 0.25, 0.5, 0.75, 1].map(t => t * maxV);
 
-  const savingYear = months.filter(m => m.kind === 'uber').reduce((a, m) => a + (m.taxiEst - m.uber), 0);
+  const filtered = months.find(m => m.key === selectedKey);
+  const savingShown = (filtered ? [filtered] : months).filter(m => m.kind === 'uber').reduce((a, m) => a + (m.taxiEst - m.uber), 0);
+  const savingLabel = filtered ? `Saving de ${filtered.label}/${filtered.key.slice(0, 4)}` : 'Saving acumulado';
 
   if (loading) {
     return <div className="h-80 flex items-center justify-center text-xs text-slate-500">Carregando histórico do táxi…</div>;
@@ -148,7 +149,7 @@ export const MonthlyView: React.FC<MonthlyViewProps> = ({ dailyRecords, monthlyT
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-xs bg-slate-300 inline-block" />Táxi estimado</span>
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-xs bg-slate-900 inline-block" />Uber realizado</span>
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-xs inline-block border border-dashed border-slate-500" />Projeção do mês</span>
-        <span className="ml-auto font-mono tabular-nums text-emerald-700 font-bold">Saving acumulado: {brl(savingYear)}</span>
+        <span className="ml-auto font-mono tabular-nums text-emerald-700 font-bold">{savingLabel}: {brl(savingShown)}</span>
       </div>
       <div className="relative w-full overflow-x-auto">
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-80 select-none">
@@ -160,12 +161,14 @@ export const MonthlyView: React.FC<MonthlyViewProps> = ({ dailyRecords, monthlyT
           ))}
           {months.map((m, i) => {
             const cx = pl + i * slot + slot / 2;
-            const isSel = active?.key === m.key;
+            const isSel = selectedKey === m.key;
             const sav = (m.taxiEstProj - m.uberProj);
             // topo mais alto entre a projeção do táxi estimado e o táxi real, para posicionar o rótulo do saving
+            // sobe o rótulo do saving quando há barra de táxi real com rótulo próprio, para não sobrepor
+            const lift = m.kind === 'uber' && m.realValue != null && y(m.realValue) <= y(m.taxiEstProj) ? 14 : 0;
             const topY = Math.min(y(m.taxiEstProj), m.realValue != null ? y(m.realValue) : Infinity);
             return (
-              <g key={m.key} className="cursor-pointer" onClick={() => setSelected(m.key)}>
+              <g key={m.key} className="cursor-pointer" onClick={() => onSelect(selectedKey === m.key ? '' : m.key)}>
                 <rect x={cx - slot / 2 + 2} y={pt - 8} width={slot - 4} height={ch + 8} rx="4" fill={isSel ? '#f1f5f9' : 'transparent'} />
                 {m.kind === 'real' && m.realValue != null && (<>
                   <rect x={cx - 15} y={y(m.realValue)} width="30" height={y(0) - y(m.realValue)} rx="3" fill="#64748b" />
@@ -184,8 +187,8 @@ export const MonthlyView: React.FC<MonthlyViewProps> = ({ dailyRecords, monthlyT
                   {m.partial && <rect x={cx + 11} y={y(m.uberProj)} width="18" height={y(0) - y(m.uberProj)} rx="3" fill="none" stroke="#94a3b8" strokeDasharray="4 3" />}
                   <rect x={cx - 9} y={y(m.taxiEst)} width="18" height={y(0) - y(m.taxiEst)} rx="3" fill="#cbd5e1" />
                   <rect x={cx + 11} y={y(m.uber)} width="18" height={y(0) - y(m.uber)} rx="3" fill="#0f172a" />
-                  <text x={cx} y={topY - 18} textAnchor="middle" fontSize="10" fontWeight="700" fill="#047857">{m.partial ? 'Saving proj.' : 'Saving'}</text>
-                  <text x={cx} y={topY - 6} textAnchor="middle" fontSize="10" fontWeight="700" fill="#047857">{brl(sav).replace(',00', '')}</text>
+                  <text x={cx} y={topY - 18 - lift} textAnchor="middle" fontSize="10" fontWeight="700" fill="#047857">{m.partial ? 'Saving proj.' : 'Saving'}</text>
+                  <text x={cx} y={topY - 6 - lift} textAnchor="middle" fontSize="10" fontWeight="700" fill="#047857">{brl(sav).replace(',00', '')}</text>
                 </>)}
                 <text x={cx} y={H - 28} textAnchor="middle" fontSize="11" fontWeight="700" fill="#0f172a">{m.label}</text>
                 <text x={cx} y={H - 14} textAnchor="middle" fontSize="10" fill="#64748b">

@@ -17,6 +17,7 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<'dia' | 'mes'>('dia');
+  const [selectedMonth, setSelectedMonth] = useState<string>(''); // 'AAAA-MM' ou '' (sem filtro)
 
   useEffect(() => { prefetchTaxiReal().catch(() => {}); }, []);
 
@@ -32,18 +33,26 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
     return `${val.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
   };
 
-  const totalSaving = dailyRecords.reduce((acc, r) => acc + r.saving, 0);
-  const totalUber = dailyRecords.reduce((acc, r) => acc + r.uberSpend, 0);
-  const totalTaxi = dailyRecords.reduce((acc, r) => acc + r.taxiSpend, 0);
-  const totalTrips = dailyRecords.reduce((acc, r) => acc + r.tripCount, 0);
-  const totalPassengers = dailyRecords.reduce((acc, r) => acc + r.passengerCount, 0);
+  // Filtro por mês (clique na barra da visão Mês): vale para os indicadores desta seção
+  const monthFilter = viewMode === 'mes' ? selectedMonth : '';
+  const scopedRecords = monthFilter ? dailyRecords.filter(r => (r.date || '').slice(0, 7) === monthFilter) : dailyRecords;
+  const noData = scopedRecords.length === 0;
+  const MONTH_NAMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+  const monthFilterLabel = monthFilter ? `${MONTH_NAMES[parseInt(monthFilter.slice(5), 10) - 1] || monthFilter}/${monthFilter.slice(0, 4)}` : '';
+  const dash = '—';
+
+  const totalSaving = scopedRecords.reduce((acc, r) => acc + r.saving, 0);
+  const totalUber = scopedRecords.reduce((acc, r) => acc + r.uberSpend, 0);
+  const totalTaxi = scopedRecords.reduce((acc, r) => acc + r.taxiSpend, 0);
+  const totalTrips = scopedRecords.reduce((acc, r) => acc + r.tripCount, 0);
+  const totalPassengers = scopedRecords.reduce((acc, r) => acc + r.passengerCount, 0);
 
   // Metas e Estimativas (Mensal e Anual)
   const monthlyTarget = targetConfig?.targetType === 'value' ? targetConfig.targetValue : 100000;
   const annualTarget = monthlyTarget * 12;
   const daysInMonth = 30;
 
-  const sampledDays = Math.max(1, dailyRecords.length);
+  const sampledDays = Math.max(1, scopedRecords.length);
   const avgDailySaving = totalSaving / sampledDays;
   const daysRemaining = Math.max(0, daysInMonth - sampledDays);
 
@@ -112,8 +121,18 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
               <span>{viewMode === 'dia' ? 'Comparativo diário de desembolso efetivo Uber vs táxi estimado' : 'Táxi real pago, táxi estimado e Uber realizado por mês'}</span>
               <span aria-hidden="true">·</span>
               <span className="font-mono tabular-nums text-emerald-700 font-bold">
-                Saving Total: {formatBRL(totalSaving)}
+                {monthFilter ? `Saving de ${monthFilterLabel}` : 'Saving Total'}: {noData ? dash : formatBRL(totalSaving)}
               </span>
+              {monthFilter && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedMonth('')}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-slate-300 bg-slate-100 text-slate-700 font-semibold hover:bg-slate-200"
+                  title="Limpar filtro de mês"
+                >
+                  Filtrando: {monthFilterLabel} <span aria-hidden="true">✕</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -123,7 +142,7 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
               <button
                 key={m}
                 type="button"
-                onClick={() => setViewMode(m)}
+                onClick={() => { setViewMode(m); if (m === 'dia') setSelectedMonth(''); }}
                 className={`px-3 py-1 rounded font-semibold ${viewMode === m ? 'bg-slate-900 text-white' : 'text-slate-600 hover:text-slate-900'}`}
               >
                 {m === 'dia' ? 'Dia' : 'Mês'}
@@ -167,10 +186,10 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
               Ritmo Médio da Operação
             </span>
             <div className="text-base font-bold font-mono tabular-nums text-slate-900">
-              {formatBRL(avgDailySaving)} <span className="text-xs font-normal text-slate-500">/dia</span>
+              {noData ? dash : formatBRL(avgDailySaving)} <span className="text-xs font-normal text-slate-500">/dia</span>
             </div>
             <span className="text-[10px] text-slate-500 block">
-              Média consolidada em {sampledDays} datas apuradas
+              {noData ? 'Sem corridas Uber neste mês' : `Média consolidada em ${sampledDays} datas apuradas`}
             </span>
           </div>
 
@@ -180,10 +199,10 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
               Estimativa Mensal (30 dias)
             </span>
             <div className="text-base font-bold font-mono tabular-nums text-blue-700">
-              {formatBRL(projectedMonthlySaving)}
+              {noData ? dash : formatBRL(projectedMonthlySaving)}
             </div>
             <span className="text-[10px] font-medium text-blue-800/80 block">
-              {projectedMonthlyPercent.toFixed(1)}% da Meta Mensal ({formatBRL(monthlyTarget)})
+              {noData ? dash : `${projectedMonthlyPercent.toFixed(1)}%`} da Meta Mensal ({formatBRL(monthlyTarget)})
             </span>
           </div>
 
@@ -193,10 +212,10 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
               Ritmo Necessário p/ Meta
             </span>
             <div className="text-base font-bold font-mono tabular-nums text-amber-800">
-              {formatBRL(dailyPaceNeeded)} <span className="text-xs font-normal text-slate-500">/dia</span>
+              {noData ? dash : formatBRL(dailyPaceNeeded)} <span className="text-xs font-normal text-slate-500">/dia</span>
             </div>
             <span className="text-[10px] text-slate-500 block">
-              {paceGap <= 0 ? 'Ritmo atual já atinge a meta!' : `Diferença de ${formatBRL(paceGap)}/dia em ${daysRemaining} dias`}
+              {noData ? '' : paceGap <= 0 ? 'Ritmo atual já atinge a meta!' : `Diferença de ${formatBRL(paceGap)}/dia em ${daysRemaining} dias`}
             </span>
           </div>
 
@@ -206,10 +225,10 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
               Estimativa Anual (Run-Rate)
             </span>
             <div className="text-base font-bold font-mono tabular-nums text-emerald-600">
-              {formatBRL(annualRunRateSaving)} <span className="text-xs font-normal text-slate-500">/ano</span>
+              {noData ? dash : formatBRL(annualRunRateSaving)} <span className="text-xs font-normal text-slate-500">/ano</span>
             </div>
             <span className="text-[10px] font-medium text-emerald-800/80 block">
-              {annualProgressPercent.toFixed(1)}% da Meta Anual ({formatBRL(annualTarget)})
+              {noData ? dash : `${annualProgressPercent.toFixed(1)}%`} da Meta Anual ({formatBRL(annualTarget)})
             </span>
           </div>
         </div>
@@ -219,14 +238,14 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
           <div>
             <span className="text-slate-500 block mb-0.5">Total de Atendimentos</span>
             <span className="text-base font-bold font-mono tabular-nums text-slate-900">
-              {totalTrips} viagens
+              {noData ? dash : `${totalTrips} viagens`}
             </span>
           </div>
           <div>
             <span className="text-slate-500 block mb-0.5">Passageiros Transportados</span>
             <div className="flex items-baseline gap-1.5 flex-wrap">
               <span className="text-base font-bold font-mono tabular-nums text-slate-900">
-                {totalPassengers} passageiros
+                {noData ? dash : `${totalPassengers} passageiros`}
               </span>
               {totalTrips > 0 && (
                 <span className="text-xs text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded font-mono font-semibold border border-blue-100" title="Média de colaboradores por viagem/carro">
@@ -238,19 +257,19 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
           <div>
             <span className="text-slate-500 block mb-0.5">Custo Estimado Táxi</span>
             <span className="text-base font-bold font-mono tabular-nums text-slate-400 line-through">
-              {formatBRL(totalTaxi)}
+              {noData ? dash : formatBRL(totalTaxi)}
             </span>
           </div>
           <div>
             <span className="text-slate-500 block mb-0.5">Desembolso Real Uber</span>
             <span className="text-base font-bold font-mono tabular-nums text-emerald-700">
-              {formatBRL(totalUber)}
+              {noData ? dash : formatBRL(totalUber)}
             </span>
           </div>
         </div>
 
         {viewMode === 'mes' ? (
-          <MonthlyView dailyRecords={dailyRecords} monthlyTarget={monthlyTarget} />
+          <MonthlyView dailyRecords={dailyRecords} monthlyTarget={monthlyTarget} selectedKey={selectedMonth} onSelect={setSelectedMonth} />
         ) : (<>
         {/* SVG Daily Chart */}
         <div className="relative w-full overflow-x-auto pt-2">
