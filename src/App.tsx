@@ -237,7 +237,7 @@ export default function App() {
             {/* Quick Chart Strip Below the Resumo Tables */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               <div className="lg:col-span-8">
-                <DailySavingChart dailyRecords={dailyRecords} allTrips={periodTrips} targetConfig={targetConfig} />
+                <DailySavingChart dailyRecords={dailyRecords} allTrips={periodTrips} targetConfig={targetConfig} defaultView="dia" />
               </div>
               <div className="lg:col-span-4 space-y-4">
                 <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-xs">

@@ -59,9 +59,11 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
 
   const sampledDays = Math.max(1, scopedRecords.length);
   const avgDailySaving = totalSaving / sampledDays;
+  const avgDailyUber = totalUber / sampledDays;
   const daysRemaining = Math.max(0, daysInMonth - sampledDays);
 
   const projectedMonthlySaving = avgDailySaving * daysInMonth;
+  const projectedMonthlyUber = avgDailyUber * daysInMonth;
   const projectedMonthlyPercent = (projectedMonthlySaving / monthlyTarget) * 100;
   const dailyPaceNeeded = daysRemaining > 0 ? Math.max(0, (monthlyTarget - totalSaving) / daysRemaining) : 0;
   const paceGap = dailyPaceNeeded - avgDailySaving;
@@ -269,9 +271,20 @@ export const DailySavingChart: React.FC<DailySavingChartProps> = ({
           </div>
           <div>
             <span className="text-slate-500 block mb-0.5">Desembolso Real Uber</span>
-            <span className="text-base font-bold font-mono tabular-nums text-emerald-700">
+            <span className="text-base font-bold font-mono tabular-nums text-emerald-700 block">
               {noData ? dash : formatBRL(totalUber)}
             </span>
+            {!noData && !isClosedMonth && (
+              <span
+                className="text-[11px] text-slate-500 block mt-0.5"
+                title={`Projeção linear para 30 dias com base na média diária de ${formatBRL(avgDailyUber)}/dia em ${sampledDays} dias apurados`}
+              >
+                Est. mensal (30d):{' '}
+                <strong className="font-mono tabular-nums font-semibold text-slate-700">
+                  {formatBRL(projectedMonthlyUber)}
+                </strong>
+              </span>
+            )}
           </div>
         </div>
 
